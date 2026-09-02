@@ -1,3 +1,6 @@
+const dns = require("dns");
+dns.setServers(["8.8.8.8", "8.8.4.4"]);
+
 const path = require("path");
 require("dotenv").config();
 
@@ -33,7 +36,7 @@ const port = 3000;
 //   credentials: true              
 // })); 
 app.use(cors({
-    origin:['http://localhost:5173', 'https://www.revayahone.com'],
+    origin:['http://localhost:5173', 'https://www.revayah.one'],
     credentials: true
 }))
 app.use(express.json({limit: '50mb'}))
@@ -67,7 +70,7 @@ app.listen(port, () => {
     const bucketName = process.env.AWS_BUCKET_NAME;
     const AWS_ACCESS_KEY_ID = process.env.AWS_ACCESS_KEY_ID;
     const AWS_SECRET_ACCESS_KEY = process.env.AWS_SECRET_ACCESS_KEY;
-    console.log(AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY ,"AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY");
+    // console.log(AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY ,"AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY");
 
     if (!AWS_ACCESS_KEY_ID || !AWS_SECRET_ACCESS_KEY) {
       throw new Error("AWS credentials missing. Please set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env");
