@@ -1,10 +1,8 @@
-
 const cardService = require("../services/card-service");
-// CREATE card with S3 file uploads (POST)
-
 const path = require("path");
+const { processCardBase64Files } = require("../utils/azure-base64-uploader");
 
-// CREATE card with S3 file uploads (POST)
+// CREATE card with Azure Blob Storage file uploads (POST)
 exports.createCard = async (req, res) => {
     try {
         let cardDetails = req.body;
@@ -176,6 +174,9 @@ exports.createCard = async (req, res) => {
             }
         });
        
+        // Process any base64 files and upload to Azure Blob Storage
+        await processCardBase64Files(cardDetails);
+
         // Call service to create card
         const card = await cardService.createCard(cardDetails);
         
@@ -195,7 +196,7 @@ exports.createCard = async (req, res) => {
     }
 };
 
-// UPDATE card with S3 file uploads (PUT)
+// UPDATE card with Azure Blob Storage file uploads (PUT)
 exports.updateCard = async (req, res) => {
     try {
         const { cardId } = req.params;
@@ -236,7 +237,7 @@ exports.updateCard = async (req, res) => {
             });
         }
         
-        // Handle S3 file uploads if present
+        // Handle Azure Blob Storage file uploads if present
         if (req.files) {
             console.log("Uploaded files for update:", req.files);
             
@@ -313,6 +314,9 @@ exports.updateCard = async (req, res) => {
             }
         }
         
+        // Process any base64 files and upload to Azure Blob Storage
+        await processCardBase64Files(cardDetails);
+
         // Call service to update card
         const updatedCard = await cardService.updateCard(cardId, cardDetails);
        
@@ -675,6 +679,7 @@ exports.updateCardByEmail = async (req, res) => {
             return res.status(400).json({ error: "Email or card details not found" });
         }
        
+        await processCardBase64Files(cardDetails);
         const card = await cardService.updateCardByEmail(email, cardDetails);
         if (!card) {
             return res.status(404).json({ error: "Card not found" });
@@ -705,6 +710,7 @@ exports.autoSaveCard = async (req, res) => {
             return res.status(400).json({ error: "Card ID or card data not found" });
         }
        
+        await processCardBase64Files(cardData);
         const card = await cardService.autoSaveCard(cardId, cardData);
         if (!card) {
             return res.status(404).json({ error: "Card not found" });
@@ -729,6 +735,7 @@ exports.autoSaveCardByEmail = async (req, res) => {
             return res.status(400).json({ error: "Email or card data not found" });
         }
        
+        await processCardBase64Files(cardData);
         const card = await cardService.autoSaveCardByEmail(email, cardData);
         if (!card) {
             return res.status(404).json({ error: "Card not found" });
