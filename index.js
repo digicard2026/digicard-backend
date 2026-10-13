@@ -13,7 +13,7 @@ const connectDB = require("./src/config/db");
 const app = express();
 
 const bodyParser = require("body-parser"); // Added for email + PDF
-const S3Util = require('./src/utils/s3Util'); 
+const AzureBlobUtil = require('./src/utils/azureBlobUtil'); 
 // Route files
 const authRoutes = require('./src/routes/auth-routes');
 const userRoutes = require('./src/routes/user-routes');
@@ -67,30 +67,23 @@ app.listen(port, () => {
 
 (async () => {
   try {
-    const bucketName = process.env.AWS_BUCKET_NAME;
-    const AWS_ACCESS_KEY_ID = process.env.AWS_ACCESS_KEY_ID;
-    const AWS_SECRET_ACCESS_KEY = process.env.AWS_SECRET_ACCESS_KEY;
-    // console.log(AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY ,"AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY");
+    const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
+    const containerName = process.env.AZURE_STORAGE_CONTAINER_NAME || "cards";
 
-    if (!AWS_ACCESS_KEY_ID || !AWS_SECRET_ACCESS_KEY) {
-      throw new Error("AWS credentials missing. Please set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env");
+    if (!connectionString || connectionString.includes("<YOUR_AZURE_ACCOUNT_NAME>")) {
+      console.warn("⚠️ AZURE_STORAGE_CONNECTION_STRING is not set or contains placeholder values in .env. Please update it with your real Azure connection string.");
+      return;
     }
-    if (!process.env.AWS_REGION) {
-      throw new Error("AWS region missing. Please set AWS_REGION in .env");
-    }
-    if (!bucketName) {
-      throw new Error("Bucket name missing. Please set AWS_BUCKET_NAME in .env");
-    }
-    const s3Util = new S3Util(process.env.AWS_REGION);
 
-    const isConnected = await s3Util.testConnection(bucketName);
+    const azureBlobUtil = new AzureBlobUtil(connectionString);
+    const isConnected = await azureBlobUtil.testConnection(containerName);
 
     if (isConnected) {
-      console.log(" S3 connection successful");
+      console.log("✅ Azure Blob Storage connection successful");
     } else {
-      console.log(" Failed to connect to S3");
+      console.log("❌ Failed to connect to Azure Blob Storage");
     }
   } catch (error) {
-    console.error("Error:", error.message);
+    console.error("Azure Storage Error:", error.message);
   }
 })();

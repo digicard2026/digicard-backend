@@ -1,91 +1,50 @@
-// const multer = require("multer");
-// const multerS3 = require("multer-s3");
-// const { S3Client } = require("@aws-sdk/client-s3");
-// const path = require("path");
-
-// const MAX_FILE_SIZE = 5 * 1024 * 1024; // 2MB
-// const BUCKET_NAME = process.env.AWS_BUCKET_NAME;
-// const REGION = process.env.AWS_REGION;
-// const AWS_ACCESS_KEY_ID = process.env.AWS_ACCESS_KEY_ID;
-// const AWS_SECRET_ACCESS_KEY = process.env.AWS_SECRET_ACCESS_KEY;
-// console.log(REGION, BUCKET_NAME, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,'multer');
-
-
-// const s3 = new S3Client({
-//   region: REGION,
-//   credentials: {
-//     accessKeyId: AWS_ACCESS_KEY_ID,
-//     secretAccessKey: AWS_SECRET_ACCESS_KEY,
-//   },
-// });
-
-// // Multer-S3 Storage
-// const storage = multerS3({
-//   s3,
-//   bucket: BUCKET_NAME,
-//   contentType: multerS3.AUTO_CONTENT_TYPE,
-//   key: (req, file, cb) => {
-//     const ext = path.extname(file.originalname);
-//     const fileName = `${file.fieldname}-${Date.now()}${ext}`;
-//     cb(null, `cards/${fileName}`);
-//   },
-// });
-
-// const allowedMimeTypes = [
-//   "image/jpeg",
-//   "image/png",
-//   "image/jpg",
-//   "application/pdf",
-//   "video/mp4",
-//   "video/webm",
-//   "video/quicktime"
-// ];
-
-// const fileFilter = (req, file, cb) => {
-//   if (allowedMimeTypes.includes(file.mimetype)) {
-//     cb(null, true);
-//   } else {
-//     cb(new Error("Invalid file type. Only JPEG, PNG, JPG, PDF allowed."), false);
-//   }
-// };
-
-// const cardUpload = multer({
-//   storage,
-//   fileFilter,
-//   limits: { fileSize: MAX_FILE_SIZE },
-// });
-
-// module.exports = cardUpload;
 const multer = require("multer");
-const multerS3 = require("multer-s3");
-const { S3Client } = require("@aws-sdk/client-s3");
+const { BlobServiceClient } = require("@azure/storage-blob");
 const path = require("path");
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB (adjusted)
-const BUCKET_NAME = process.env.AWS_BUCKET_NAME;
-const REGION = process.env.AWS_REGION;
-const AWS_ACCESS_KEY_ID = process.env.AWS_ACCESS_KEY_ID;
-const AWS_SECRET_ACCESS_KEY = process.env.AWS_SECRET_ACCESS_KEY;
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const CONNECTION_STRING = process.env.AZURE_STORAGE_CONNECTION_STRING;
+const CONTAINER_NAME = process.env.AZURE_STORAGE_CONTAINER_NAME || "cards";
 
-// Validate environment variables
-if (!BUCKET_NAME || !REGION || !AWS_ACCESS_KEY_ID || !AWS_SECRET_ACCESS_KEY) {
-    throw new Error("AWS configuration missing in environment variables");
+let blobServiceClient = null;
+let containerClient = null;
+
+const isValidConnectionString = 
+    CONNECTION_STRING && 
+    !CONNECTION_STRING.includes("<YOUR_AZURE_ACCOUNT_NAME>") && 
+    !CONNECTION_STRING.includes("<YOUR_AZURE_ACCOUNT_KEY>");
+
+if (isValidConnectionString) {
+    try {
+        blobServiceClient = BlobServiceClient.fromConnectionString(CONNECTION_STRING);
+        containerClient = blobServiceClient.getContainerClient(CONTAINER_NAME);
+
+        // Ensure container exists with public blob read access
+        (async () => {
+            try {
+                const exists = await containerClient.exists();
+                if (!exists) {
+                    await containerClient.create({ access: "blob" });
+                    console.log(`Azure container '${CONTAINER_NAME}' created with public blob access.`);
+                }
+            } catch (err) {
+                console.error("Error ensuring Azure container exists:", err.message);
+            }
+        })();
+    } catch (initErr) {
+        console.error("⚠️ Error initializing Azure Blob Storage client:", initErr.message);
+    }
+} else {
+    console.warn("⚠️ Warning: AZURE_STORAGE_CONNECTION_STRING in .env is missing or contains placeholder values. Please update it with your actual Azure connection string.");
 }
 
-const s3 = new S3Client({
-    region: REGION,
-    credentials: {
-        accessKeyId: AWS_ACCESS_KEY_ID,
-        secretAccessKey: AWS_SECRET_ACCESS_KEY,
-    },
-});
+// Custom Multer Storage Engine for Azure Blob Storage
+const azureBlobStorage = {
+    _handleFile(req, file, cb) {
+        if (!containerClient) {
+            return cb(new Error("Azure Blob Storage client is not initialized. Please configure valid AZURE_STORAGE_CONNECTION_STRING in .env."));
+        }
 
-// Multer-S3 Storage
-const storage = multerS3({
-    s3,
-    bucket: BUCKET_NAME,
-    contentType: multerS3.AUTO_CONTENT_TYPE,
-    key: (req, file, cb) => {
         const ext = path.extname(file.originalname);
         const timestamp = Date.now();
         const randomString = Math.random().toString(36).substring(7);
@@ -93,16 +52,52 @@ const storage = multerS3({
             .replace(ext, '')
             .replace(/[^a-zA-Z0-9]/g, '-')
             .toLowerCase();
-        const fileName = `${file.fieldname}-${sanitizedFilename}-${timestamp}-${randomString}${ext}`;
-        cb(null, `cards/${fileName}`);
+        
+        const blobName = `cards/${file.fieldname}-${sanitizedFilename}-${timestamp}-${randomString}${ext}`;
+        const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+
+        const chunks = [];
+        file.stream.on("data", (chunk) => chunks.push(chunk));
+        file.stream.on("end", async () => {
+            try {
+                const buffer = Buffer.concat(chunks);
+                await blockBlobClient.upload(buffer, buffer.length, {
+                    blobHTTPHeaders: {
+                        blobContentType: file.mimetype,
+                    },
+                });
+
+                cb(null, {
+                    location: blockBlobClient.url, // Keeps exact compatibility with controller (file.location)
+                    url: blockBlobClient.url,
+                    blobName: blobName,
+                    container: CONTAINER_NAME,
+                    size: buffer.length,
+                    mimetype: file.mimetype,
+                    originalname: file.originalname,
+                });
+            } catch (uploadError) {
+                cb(uploadError);
+            }
+        });
+        file.stream.on("error", (streamError) => cb(streamError));
     },
-});
+
+    _removeFile(req, file, cb) {
+        if (file.blobName && containerClient) {
+            const blockBlobClient = containerClient.getBlockBlobClient(file.blobName);
+            blockBlobClient.deleteIfExists().then(() => cb(null)).catch(cb);
+        } else {
+            cb(null);
+        }
+    },
+};
 
 const allowedMimeTypes = [
     "image/jpeg",
     "image/png",
     "image/jpg",
-    "image/webp", // Added webp support
+    "image/webp",
     "image/gif",
     "application/pdf",
     "video/mp4",
@@ -119,11 +114,11 @@ const fileFilter = (req, file, cb) => {
 };
 
 const cardUpload = multer({
-    storage,
+    storage: azureBlobStorage,
     fileFilter,
     limits: { 
         fileSize: MAX_FILE_SIZE,
-        files: 50 // Total files limit
+        files: 50
     },
 });
 

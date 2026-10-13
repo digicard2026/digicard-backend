@@ -5,9 +5,9 @@ const cardController = require('../controllers/card-controller');
 
 const checksubscription = require("../middlewares/checkSubscription")
 
-const upload = require('../utils/multer-util'); // S3 upload middleware
+const upload = require('../utils/multer-util'); // Azure Blob Storage upload middleware
 
-// Configure file upload fields for S3
+// Configure file upload fields for Azure Blob Storage
 const cardUpload = upload.fields([
     { name: 'profilePhoto', maxCount: 1 },
     { name: 'companyLogo', maxCount: 1 },
@@ -19,10 +19,10 @@ const cardUpload = upload.fields([
     { name: 'videos', maxCount: 10 }
 ]);
 
-// CREATE card with S3 file upload (POST)
+// CREATE card with Azure Blob Storage file upload (POST)
 router.post('/create-card', cardUpload, cardController.createCard);
 
-// UPDATE card with S3 file upload (PUT)
+// UPDATE card with Azure Blob Storage file upload (PUT)
 router.put('/update-card/:cardId', cardUpload, cardController.updateCard);
 
 router.get('/types/all', cardController.getAllCardTypes);
