@@ -335,8 +335,34 @@ const cardSchema = new mongoose.Schema({
   // Card Type/Plan
   cardType: {
     type: String,
-    enum: ['Personal', 'Business', 'BusinessPremium'],
+    enum: [
+      'Personal', 
+      'Business', 
+      'BusinessPremium', 
+      'Professionals', 
+      'Entrepreneurials', 
+      'EntrepreneurialsMulti', 
+      'CorporateBusiness', 
+      'MiniWebsite'
+    ],
     default: 'Personal'
+  },
+  
+  // Add-ons
+  addons: {
+    gallery: { type: Boolean, default: false },
+    docsBuilder: { type: Boolean, default: false },
+    nfcCard: { type: Boolean, default: false },
+    catalogBuilder: { type: Boolean, default: false },
+    brochureBuilder: { type: Boolean, default: false },
+    profileBuilder: { type: Boolean, default: false },
+    portfolioBuilder: { type: Boolean, default: false },
+    leadGen: { type: Boolean, default: false },
+    leadManagement: { type: Boolean, default: false },
+    appointmentBooking: { type: Boolean, default: false },
+    whatsappIntegration: { type: Boolean, default: false },
+    analytics: { type: Boolean, default: false },
+    docsManager: { type: Boolean, default: false }
   },
   
   // Metadata

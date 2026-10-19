@@ -9,9 +9,9 @@ const CONTAINER_NAME = process.env.AZURE_STORAGE_CONTAINER_NAME || "cards";
 let blobServiceClient = null;
 let containerClient = null;
 
-const isValidConnectionString = 
-    CONNECTION_STRING && 
-    !CONNECTION_STRING.includes("<YOUR_AZURE_ACCOUNT_NAME>") && 
+const isValidConnectionString =
+    CONNECTION_STRING &&
+    !CONNECTION_STRING.includes("<YOUR_AZURE_ACCOUNT_NAME>") &&
     !CONNECTION_STRING.includes("<YOUR_AZURE_ACCOUNT_KEY>");
 
 if (isValidConnectionString) {
@@ -52,7 +52,7 @@ const azureBlobStorage = {
             .replace(ext, '')
             .replace(/[^a-zA-Z0-9]/g, '-')
             .toLowerCase();
-        
+
         const blobName = `cards/${file.fieldname}-${sanitizedFilename}-${timestamp}-${randomString}${ext}`;
         const blockBlobClient = containerClient.getBlockBlobClient(blobName);
 
@@ -116,7 +116,7 @@ const fileFilter = (req, file, cb) => {
 const cardUpload = multer({
     storage: azureBlobStorage,
     fileFilter,
-    limits: { 
+    limits: {
         fileSize: MAX_FILE_SIZE,
         files: 50
     },

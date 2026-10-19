@@ -1,6 +1,37 @@
 const cardService = require("../services/card-service");
 const path = require("path");
 const { processCardBase64Files } = require("../utils/azure-base64-uploader");
+const cardFieldsConfig = require("../config/cardFieldsConfig");
+
+// Helper to sanitize payload fields based on plan restrictions
+const sanitizeCardByPlan = (cardDetails) => {
+    const cardType = cardDetails.cardType || 'Personal';
+    if (cardType === 'Personal') {
+        const disallowedFields = [
+            'profileVideo', 'productVideo', 'nfcSettings', 'downloads', 'videos',
+            'companyName', 'companyLogo', 'logoSize', 'department', 'organization',
+            'businessHours', 'virtualNumber', 'services', 'servicesProducts',
+            'gallery', 'catalog', 'catalogPDF', 'testimonials', 'clientList',
+            'interactiveElements', 'chatAssistant', 'liveChat', 'foundedName',
+            'brandLabel', 'productRangeDisplay', 'products'
+        ];
+        disallowedFields.forEach(f => {
+            delete cardDetails[f];
+        });
+    } else if (cardType === 'Business') {
+        const disallowedFields = [
+            'interactiveElements', 'chatAssistant', 'liveChat', 'individualProductDisplay',
+            'clientList', 'businessCardInstagram', 'textbooks', 'foundedName',
+            'brandLabel', 'productRangeDisplay'
+        ];
+        if (!cardDetails.addons?.gallery) {
+            disallowedFields.push('gallery');
+        }
+        disallowedFields.forEach(f => {
+            delete cardDetails[f];
+        });
+    }
+};
 
 // CREATE card with Azure Blob Storage file uploads (POST)
 exports.createCard = async (req, res) => {
@@ -173,6 +204,9 @@ exports.createCard = async (req, res) => {
                 delete cardDetails[field];
             }
         });
+
+        // Enforce plan-level field restrictions
+        sanitizeCardByPlan(cardDetails);
        
         // Process any base64 files and upload to Azure Blob Storage
         await processCardBase64Files(cardDetails);
@@ -314,6 +348,9 @@ exports.updateCard = async (req, res) => {
             }
         }
         
+        // Enforce plan-level field restrictions
+        sanitizeCardByPlan(cardDetails);
+
         // Process any base64 files and upload to Azure Blob Storage
         await processCardBase64Files(cardDetails);
 

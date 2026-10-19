@@ -99,8 +99,8 @@ exports.signUp = async (req, res) => {
     // createUser service handles duplicate email & password hashing
     const user = await createUser({ email, password, selectedPlan });
 
-  
-    await sendVerificationEmail(user);
+
+    //  await sendVerificationEmail(user);===temporary disabled
 
 
     // -------------------- RESPONSE --------------------
@@ -285,27 +285,27 @@ exports.verifyEmail = async (req, res) => {
 exports.verifyUser = async (req, res) => {
   try {
     const { email, password } = req.body;
- 
+
     if (!email || !password) {
       return res.status(400).json({ message: "Email and password are required." });
     }
- 
+
     const user = await findUserByEmail(email);
     if (!user) {
       return res.status(401).json({ message: "Invalid email or password." });
     }
- 
-    if (!user.isEmailVerified) {
-      return res.status(403).json({
-        message: "Email not verified. Please verify your email before logging in.",
-      });
-    }
- 
+
+    // if (!user.isEmailVerified) {
+    //   return res.status(403).json({
+    //     message: "Email not verified. Please verify your email before logging in.",
+    //   });
+    // } // TEMPORARY: allows user to login directly
+
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(401).json({ message: "Invalid email or password." });
     }
- 
+
     const token = jwt.sign(
       {
         id: user._id,
@@ -315,14 +315,14 @@ exports.verifyUser = async (req, res) => {
       process.env.JWT_SECRET,
       { expiresIn: "1d" }
     );
- 
+
     // ✅ KEEP TOKEN NAME AS "token"
     res.cookie("token", token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
     });
- 
+
     res.status(200).json({
       success: true,
       user_id: user._id.toString(),
@@ -330,7 +330,7 @@ exports.verifyUser = async (req, res) => {
       registrationComplete: user.registrationComplete || false,
       message: "Login successful",
     });
- 
+
   } catch (err) {
     console.error("Verify user error:", err);
     res.status(500).json({ message: "Internal Server Error" });
