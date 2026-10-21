@@ -1,7 +1,9 @@
 // services/user-service.js
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const User = require("../models/user.model"); // your original model
+const User = require("../models/user.model");
+const Plan = require("../models/plan.model");
+const UserSubscription = require("../models/user-subscription.model");
 // Allowed roles (if needed elsewhere)
 const allowedRoles = ["admin", "partner", "franchise", "customer"];
 
@@ -16,8 +18,8 @@ exports.isValidPassword = (password) =>
   /\d/.test(password) &&
   /[!@#$%^&*(),.?":{}|<>]/.test(password);
 
-// Create user
-exports.createUser = async ({ email, password, selectedPlan }) => {
+// Create user & initialize subscription with selected plan and addons
+exports.createUser = async ({ email, password, selectedPlan, selectedAddons = [], billingCycle = "monthly" }) => {
   try {
     const cleanEmail = email.trim().toLowerCase();
 
@@ -31,8 +33,49 @@ exports.createUser = async ({ email, password, selectedPlan }) => {
       password: hashedPassword,
       role: selectedPlan ? "customer" : "",
       isActive: true,
-      registrationComplete: true,// TEMPORARY: allows user to login directly
+      registrationComplete: true, // TEMPORARY: allows user to login directly
     });
+
+    // Task 1.4: Initialize UserSubscription upon registration with selected plan and addons
+    if (selectedPlan) {
+      try {
+        const cycle = billingCycle === "yearly" ? "yearly" : "monthly";
+        let plan = await Plan.findOne({
+          name: new RegExp(`^${selectedPlan}$`, "i"),
+          duration: cycle
+        });
+
+        if (!plan) {
+          plan = await Plan.findOne({ name: new RegExp(`^${selectedPlan}$`, "i") });
+        }
+
+        const startDate = new Date();
+        const endDate = new Date(startDate.getTime() + 7 * 24 * 60 * 60 * 1000); // 7-day free trial
+
+        const sanitizedAddons = Array.isArray(selectedAddons)
+          ? selectedAddons.map(a => String(a).toLowerCase().trim())
+          : [];
+
+        await UserSubscription.create({
+          userId: user._id,
+          planId: plan ? plan._id : null,
+          planName: plan ? plan.name : selectedPlan,
+          planCategory: plan ? plan.category : selectedPlan.toLowerCase(),
+          duration: cycle,
+          startDate,
+          endDate,
+          paymentStatus: "free_trial",
+          status: "active",
+          amountPaid: 0,
+          purchasedAddons: sanitizedAddons,
+          unlockedFields: []
+        });
+
+        console.log(`UserSubscription trial initialized for user ${user.email} (${selectedPlan})`);
+      } catch (subErr) {
+        console.error("Failed to initialize UserSubscription upon registration:", subErr);
+      }
+    }
 
     return user;
   } catch (error) {

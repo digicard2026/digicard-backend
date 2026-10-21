@@ -20,6 +20,8 @@ const SubscriptionPlanSchema = new mongoose.Schema(
       default: "pending"
     },
     transactionId: { type: String }, // Razorpay payment ID
+    purchasedAddons: [{ type: String, lowercase: true, trim: true }],
+    unlockedFields: [{ type: String, trim: true }]
   },
   { timestamps: true }
 );

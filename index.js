@@ -24,6 +24,7 @@ const subscriptionRoutes = require('./src/routes/subscription-routes');
 const planRoute = require('./src/routes/plan-route');
 const paymentRoute = require('./src/routes/payment-routes');
 const adminRoutes = require("./src/routes/admin-routes");
+const addonRoutes = require("./src/routes/addon-routes");
 
 
 
@@ -56,6 +57,7 @@ app.use('/api/v1/franchise-partner', franchisePartner);
 app.use('/api/v1/card-routes', cardRoutes);
 app.use("/api/v1/check", subscriptionRoutes);
 app.use('/api/v1/plans', planRoute);
+app.use('/api/v1/addons', addonRoutes);
 app.use('/api/v1/payments', paymentRoute);
 app.use("/api/v1/admin", adminRoutes);
 // Start server

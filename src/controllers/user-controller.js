@@ -79,7 +79,7 @@ const UserSubscription = require("../models/user-subscription.model");
 // -------------------- SIGN UP --------------------
 exports.signUp = async (req, res) => {
   try {
-    const { email, password, confirmPassword, selectedPlan } = req.body;
+    const { email, password, confirmPassword, selectedPlan, selectedAddons, billingCycle } = req.body;
 
     if (!email || !password || !confirmPassword)
       return res.status(400).json({ error: "Email, password, and confirm password are required." });
@@ -96,8 +96,8 @@ exports.signUp = async (req, res) => {
     if (password !== confirmPassword)
       return res.status(400).json({ error: "Passwords do not match." });
 
-    // createUser service handles duplicate email & password hashing
-    const user = await createUser({ email, password, selectedPlan });
+    // createUser service handles duplicate email, password hashing, and subscription initialization
+    const user = await createUser({ email, password, selectedPlan, selectedAddons, billingCycle });
 
 
     //  await sendVerificationEmail(user);===temporary disabled
