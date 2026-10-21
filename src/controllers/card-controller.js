@@ -1,6 +1,137 @@
 const cardService = require("../services/card-service");
 const path = require("path");
 const { processCardBase64Files } = require("../utils/azure-base64-uploader");
+const cardFieldsConfig = require("../config/cardFieldsConfig");
+const UserSubscription = require("../models/user-subscription.model");
+const Plan = require("../models/plan.model");
+const Addon = require("../models/addon.model");
+const User = require("../models/user.model");
+
+// Server-side entitlement validation checking subscription plan allowedFields & purchasedAddons
+const validateAndSanitizeEntitlements = async (cardDetails, userIdentifier = null) => {
+    try {
+        // 1. Resolve userId
+        let userId = cardDetails.userId;
+        if (!userId && userIdentifier) {
+            if (typeof userIdentifier === 'string' && userIdentifier.includes('@')) {
+                const user = await User.findOne({ email: userIdentifier.trim().toLowerCase() });
+                if (user) userId = user._id;
+            } else {
+                userId = userIdentifier;
+            }
+        }
+        if (!userId && cardDetails.email) {
+            const user = await User.findOne({ email: cardDetails.email.trim().toLowerCase() });
+            if (user) userId = user._id;
+        }
+
+        // 2. Fetch active user subscription
+        let subscription = null;
+        if (userId) {
+            subscription = await UserSubscription.findOne({
+                userId,
+                status: "active",
+                endDate: { $gte: new Date() }
+            }).sort({ createdAt: -1 }).populate("planId");
+        }
+
+        // 3. Determine plan name and allowed fields
+        const allowedFieldsSet = new Set();
+        let effectivePlanName = cardDetails.cardType || "Personal";
+
+        if (subscription) {
+            if (subscription.planId && subscription.planId.name) {
+                effectivePlanName = subscription.planId.name;
+            } else if (subscription.planName) {
+                effectivePlanName = subscription.planName;
+            }
+
+            // Enforce verified subscription plan rather than untrusted client input
+            cardDetails.cardType = effectivePlanName;
+
+            // Add fields allowed by plan model
+            if (subscription.planId && Array.isArray(subscription.planId.allowedFields) && subscription.planId.allowedFields.length > 0) {
+                subscription.planId.allowedFields.forEach(f => allowedFieldsSet.add(f));
+            }
+        }
+
+        // Fallback to cardFieldsConfig if allowedFields not populated in DB
+        if (allowedFieldsSet.size === 0) {
+            const config = cardFieldsConfig[effectivePlanName] || cardFieldsConfig.Personal;
+            (config.allowed || []).forEach(f => allowedFieldsSet.add(f));
+        }
+
+        // Metadata & system fields always allowed
+        [
+            '_id', 'userId', 'cardType', 'cardLayout', 'design', 'isPublic',
+            'urlSlug', 'shareableUrl', 'customUrl', 'createdAt', 'updatedAt',
+            'addons', 'socialLinks', 'dynamicQRCode', 'theme', 'colorScheme'
+        ].forEach(f => allowedFieldsSet.add(f));
+
+        // 4. Validate client-submitted Add-ons against subscription.purchasedAddons
+        const userPurchasedAddons = new Set(
+            (subscription?.purchasedAddons || []).map(a => a.toLowerCase().trim())
+        );
+
+        // Fetch active addons to identify their unlockedFields
+        let activeAddonDocs = [];
+        try {
+            activeAddonDocs = await Addon.find({ isActive: true });
+        } catch (e) {
+            activeAddonDocs = [];
+        }
+
+        const addonMap = new Map();
+        activeAddonDocs.forEach(a => addonMap.set(a.key.toLowerCase(), a));
+
+        if (cardDetails.addons && typeof cardDetails.addons === 'object') {
+            const sanitizedAddons = {};
+            for (const [addonKey, isEnabled] of Object.entries(cardDetails.addons)) {
+                const normalizedKey = addonKey.toLowerCase().trim();
+                // Client-submitted add-on MUST exist in subscription.purchasedAddons (or accepted during initial card setup if no subscription yet)
+                if (isEnabled && (!subscription || userPurchasedAddons.has(normalizedKey))) {
+                    sanitizedAddons[addonKey] = true;
+                    // Add unlocked fields from this addon
+                    const addonDoc = addonMap.get(normalizedKey);
+                    if (addonDoc && Array.isArray(addonDoc.unlockedFields)) {
+                        addonDoc.unlockedFields.forEach(f => allowedFieldsSet.add(f));
+                    }
+                } else {
+                    sanitizedAddons[addonKey] = false;
+                }
+            }
+            cardDetails.addons = sanitizedAddons;
+        }
+
+        // Also add unlockedFields stored directly on subscription
+        if (subscription?.unlockedFields) {
+            subscription.unlockedFields.forEach(f => allowedFieldsSet.add(f));
+        }
+
+        // 5. Sanitize submitted fields against allowedFieldsSet
+        const allPotentialFields = [
+            'profilePhoto', 'companyLogo', 'logoSize', 'firstName', 'lastName', 'prefix', 'suffix',
+            'jobTitle', 'tagline', 'organization', 'companyName', 'department', 'aboutText', 'bio',
+            'phones', 'email', 'emails', 'websites', 'addresses', 'enableOneTapCall', 'enableWhatsApp',
+            'enableEmail', 'virtualNumber', 'businessHours', 'profileVideo', 'productVideo',
+            'services', 'servicesProducts', 'gallery', 'catalog', 'catalogPDF', 'testimonials',
+            'clientList', 'nfcSettings', 'downloads', 'videos', 'interactiveElements',
+            'individualProductDisplay', 'businessCardInstagram', 'textbooks', 'chatAssistant',
+            'liveChat', 'foundedName', 'brandLabel', 'productRangeDisplay', 'products'
+        ];
+
+        allPotentialFields.forEach(field => {
+            if (cardDetails[field] !== undefined && !allowedFieldsSet.has(field)) {
+                delete cardDetails[field];
+            }
+        });
+
+        return cardDetails;
+    } catch (err) {
+        console.error("Error in validateAndSanitizeEntitlements:", err);
+        return cardDetails;
+    }
+};
 
 // CREATE card with Azure Blob Storage file uploads (POST)
 exports.createCard = async (req, res) => {
@@ -173,6 +304,9 @@ exports.createCard = async (req, res) => {
                 delete cardDetails[field];
             }
         });
+
+        // Enforce plan-level field restrictions & server-side entitlement checks
+        await validateAndSanitizeEntitlements(cardDetails, req.user?.id || cardDetails.userId || cardDetails.email);
        
         // Process any base64 files and upload to Azure Blob Storage
         await processCardBase64Files(cardDetails);
@@ -314,6 +448,9 @@ exports.updateCard = async (req, res) => {
             }
         }
         
+        // Enforce plan-level field restrictions & server-side entitlement checks
+        await validateAndSanitizeEntitlements(cardDetails, req.user?.id || cardDetails.userId || cardDetails.email);
+
         // Process any base64 files and upload to Azure Blob Storage
         await processCardBase64Files(cardDetails);
 

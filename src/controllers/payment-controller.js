@@ -52,17 +52,30 @@ exports.createSubscriptionOrder = async (req, res) => {
       });
     }
 
-    const { planId } = req.body;
+    const {
+      planId,
+      planName,
+      billingCycle = "monthly",
+      amount,
+      selectedAddons = []
+    } = req.body;
     const userId = req.user.id;
 
-    if (!planId) {
+    if (!planId && !planName) {
       return res.status(400).json({
         success: false,
-        message: "Plan ID is required"
+        message: "Plan ID or Plan Name is required"
       });
     }
 
-    const result = await createOrderWithSubscription(planId, userId);
+    const result = await createOrderWithSubscription(
+      planId,
+      userId,
+      selectedAddons,
+      billingCycle,
+      amount,
+      planName
+    );
 
     if (!result.success) {
       return res.status(400).json(result);
@@ -144,12 +157,16 @@ exports.verifyAndActivate = async (req, res) => {
       razorpay_order_id,
       razorpay_payment_id,
       razorpay_signature,
-      planId
+      planId,
+      planName,
+      duration,
+      amountPaid,
+      selectedAddons = []
     } = req.body;
 
     const userId = req.user.id;
 
-    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature || !planId) {
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
       return res.status(400).json({ 
         success: false, 
         message: "Missing payment details" 
@@ -161,7 +178,11 @@ exports.verifyAndActivate = async (req, res) => {
       razorpay_payment_id,
       razorpay_signature,
       userId,
-      planId
+      planId,
+      planName,
+      duration,
+      amountPaid,
+      selectedAddons
     );
 
     if (!result.success) {

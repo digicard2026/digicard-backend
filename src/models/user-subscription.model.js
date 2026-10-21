@@ -1,33 +1,105 @@
-// models/UserSubscription.model.js
+// models/user-subscription.model.js
 const mongoose = require("mongoose");
 
 const UserSubscriptionSchema = new mongoose.Schema(
   {
-    userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true
+    },
 
-    planId: { type: mongoose.Schema.Types.ObjectId, ref: "Plan", required: false },
+    planId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Plan",
+      required: false
+    },
+
+    // Kept for backward compatibility with existing routes
     subscriptionPlanId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "SubscriptionPlan",
       required: false,
     },
 
-    startDate: { type: Date, required: true },
-    endDate: { type: Date, required: true },
+    planName: {
+      type: String,
+      default: "Personal"
+    },
 
-    paymentId: { type: String }, // Razorpay/Stripe ID
-    amountPaid: { type: Number, required: true },
+    planCategory: {
+      type: String,
+      default: "personal"
+    },
+
+    duration: {
+      type: String,
+      enum: ["monthly", "six_months", "yearly"],
+      default: "monthly"
+    },
+
+    startDate: {
+      type: Date,
+      required: true,
+      default: Date.now
+    },
+
+    endDate: {
+      type: Date,
+      required: true
+    },
+
+    paymentStatus: {
+      type: String,
+      enum: ["pending", "success", "failed", "free_trial"],
+      default: "free_trial"
+    },
 
     status: {
       type: String,
-      enum: ["active", "expired"],
+      enum: ["active", "expired", "cancelled", "pending"],
       default: "active",
+      index: true
     },
-      // ADD THESE 2 FIELDS:
-    razorpayOrderId: { type: String }, // Same as in SubscriptionPlan
-    razorpaySignature: { type: String }, // Payment verification signature
+
+    amountPaid: {
+      type: Number,
+      default: 0
+    },
+
+    paymentId: {
+      type: String,
+      default: null
+    },
+
+    razorpayOrderId: {
+      type: String,
+      default: null
+    },
+
+    razorpaySignature: {
+      type: String,
+      default: null
+    },
+
+    // Consolidated Addon Entitlements
+    purchasedAddons: [
+      {
+        type: String,
+        lowercase: true,
+        trim: true
+      }
+    ],
+
+    unlockedFields: [
+      {
+        type: String,
+        trim: true
+      }
+    ]
   },
   { timestamps: true }
 );
 
-module.exports = mongoose.model("UserSubscription", UserSubscriptionSchema);
+module.exports = mongoose.models.UserSubscription || mongoose.model("UserSubscription", UserSubscriptionSchema);

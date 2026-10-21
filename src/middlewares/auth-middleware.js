@@ -168,35 +168,27 @@
 const jwt = require("jsonwebtoken");
  
 const auth = (req, res, next) => {
-
   try {
-
-    // ✅ Read token from cookies
-
-    const token = req.cookies.token;
- 
-    if (!token) {
-
-      return res.status(401).json({
-
-        success: false,
-
-        message: "Authentication token missing",
-
-      });
-
+    // Read token from cookies OR authorization header
+    let token = req.cookies?.token;
+    if (!token && req.headers?.authorization?.startsWith("Bearer ")) {
+      token = req.headers.authorization.split(" ")[1];
     }
- 
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication token missing",
+      });
+    }
+
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
- 
+
     req.user = {
-
-      id: decoded.id || decoded.userId,
-
+      id: decoded.id || decoded.userId || decoded._id,
       role: decoded.role || null,
-
     };
- 
+
     next();
 
   } catch (error) {

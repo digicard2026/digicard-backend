@@ -8,24 +8,25 @@ const express = require('express');
 const cors = require('cors');
 
 const cookieParser = require('cookie-parser');
- 
+
 const connectDB = require("./src/config/db");
 const app = express();
 
 const bodyParser = require("body-parser"); // Added for email + PDF
-const AzureBlobUtil = require('./src/utils/azureBlobUtil'); 
+const AzureBlobUtil = require('./src/utils/azureBlobUtil');
 // Route files
 const authRoutes = require('./src/routes/auth-routes');
 const userRoutes = require('./src/routes/user-routes');
-const cardRoutes =require('./src/routes/card-routes');
+const cardRoutes = require('./src/routes/card-routes');
 //  const digicard =require()
 const franchisePartner = require('./src/routes/franchisePartner-routes')
-const  subscriptionRoutes =require('./src/routes/subscription-routes');
-const planRoute =require('./src/routes/plan-route');
-const paymentRoute =require('./src/routes/payment-routes');
+const subscriptionRoutes = require('./src/routes/subscription-routes');
+const planRoute = require('./src/routes/plan-route');
+const paymentRoute = require('./src/routes/payment-routes');
 const adminRoutes = require("./src/routes/admin-routes");
+const addonRoutes = require("./src/routes/addon-routes");
 
- 
+
 
 
 
@@ -36,11 +37,11 @@ const port = 3000;
 //   credentials: true              
 // })); 
 app.use(cors({
-    origin:['http://localhost:5173', 'https://www.revayah.one'],
-    credentials: true
+  origin: ['http://localhost:5173', 'https://www.revayah.one'],
+  credentials: true
 }))
-app.use(express.json({limit: '50mb'}))
-app.use(cookieParser({limit: '50mb', extended: true}));
+app.use(express.json({ limit: '50mb' }))
+app.use(cookieParser({ limit: '50mb', extended: true }));
 connectDB();
 
 app.get("/api/v1", (req, res) => {
@@ -53,10 +54,11 @@ app.use("/api/v1/auth", authRoutes);
 app.use('/api/v1/franchise-partner', franchisePartner);
 
 // Email invoice route
-app.use('/api/v1/card-routes',cardRoutes);
+app.use('/api/v1/card-routes', cardRoutes);
 app.use("/api/v1/check", subscriptionRoutes);
-app.use('/api/v1/plans',planRoute);
-app.use('/api/v1/payments',paymentRoute);
+app.use('/api/v1/plans', planRoute);
+app.use('/api/v1/addons', addonRoutes);
+app.use('/api/v1/payments', paymentRoute);
 app.use("/api/v1/admin", adminRoutes);
 // Start server
 app.listen(port, () => {
