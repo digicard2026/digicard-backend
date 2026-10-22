@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const FranchisePartner = require("../models/franchise-partner.model");
+const User = require("../models/user.model");
 
 // -------------------------------------------------
 // FUNCTION-BASED SERVICE (EXPORT AT DECLARATION)
@@ -31,7 +32,11 @@ exports.addPartnerToFranchise = async (franchiseUserId, partnerData) => {
 
     if (!franchise) throw new Error("Franchise not found");
 
-    const newPartner = { ...partnerData, partnerId: partnerData.userId, status: "pending" };
+    const newPartner = { 
+      ...partnerData, 
+      partnerId: partnerData.userId || partnerData.partnerId, 
+      status: partnerData.status || "pending" 
+    };
 
     franchise.partners.push(newPartner);
 
@@ -65,7 +70,12 @@ exports.getPartnerFromFranchise = async (franchiseUserId, partnerId) => {
 
     if (!franchise) throw new Error("Franchise not found");
 
-    const partner = franchise.partners.id(partnerId);
+    // Search by subdocument _id, or embedded partnerId (User ID)
+    const partner = (franchise.partners.id && franchise.partners.id(partnerId)) ||
+      franchise.partners.find(
+        (p) => p._id?.toString() === partnerId?.toString() || p.partnerId?.toString() === partnerId?.toString()
+      );
+
     if (!partner) throw new Error("Partner not found");
 
     return partner;
@@ -100,7 +110,7 @@ exports.saveRegistrationStep = async (stepData) => {
       if (!franchise) throw new Error("Franchise not found");
 
       const existingIndex = franchise.partners.findIndex(
-        (p) => p.partnerId.toString() === userId
+        (p) => p.partnerId?.toString() === userId?.toString() || p._id?.toString() === userId?.toString()
       );
 
       if (existingIndex >= 0) {
@@ -130,7 +140,11 @@ exports.updatePartnerInFranchise = async (franchiseUserId, partnerId, updateData
 
     if (!franchise) throw new Error("Franchise not found");
 
-    const partner = franchise.partners.id(partnerId);
+    const partner = (franchise.partners.id && franchise.partners.id(partnerId)) ||
+      franchise.partners.find(
+        (p) => p._id?.toString() === partnerId?.toString() || p.partnerId?.toString() === partnerId?.toString()
+      );
+
     if (!partner) throw new Error("Partner not found");
 
     Object.assign(partner, updateData);
@@ -152,7 +166,11 @@ exports.updatePartnerStatus = async (franchiseUserId, partnerId, status) => {
 
     if (!franchise) throw new Error("Franchise not found");
 
-    const partner = franchise.partners.id(partnerId);
+    const partner = (franchise.partners.id && franchise.partners.id(partnerId)) ||
+      franchise.partners.find(
+        (p) => p._id?.toString() === partnerId?.toString() || p.partnerId?.toString() === partnerId?.toString()
+      );
+
     if (!partner) throw new Error("Partner not found");
 
     partner.status = status;
@@ -167,13 +185,25 @@ exports.updatePartnerStatus = async (franchiseUserId, partnerId, status) => {
 
 exports.getFranchiseByUserId = async (userId) => {
   try {
-    const franchise = await FranchisePartner.findOne({
-      userId,
-      role: "franchise",
-    });
+    let franchise = null;
+    if (mongoose.Types.ObjectId.isValid(userId)) {
+      franchise = await FranchisePartner.findOne({
+        $or: [{ userId }, { _id: userId }],
+        role: "franchise",
+      });
+    } else {
+      franchise = await FranchisePartner.findOne({ userId, role: "franchise" });
+    }
+
+    if (!franchise) {
+      franchise = await FranchisePartner.findOne({
+        $or: [
+          ...(mongoose.Types.ObjectId.isValid(userId) ? [{ userId }, { _id: userId }] : [{ userId }])
+        ]
+      });
+    }
 
     if (!franchise) throw new Error("Franchise not found");
-
     return franchise;
   } catch (error) {
     throw new Error(`Failed to fetch franchise: ${error.message}`);
@@ -189,7 +219,9 @@ exports.removePartnerFromFranchise = async (franchiseUserId, partnerId) => {
 
     if (!franchise) throw new Error("Franchise not found");
 
-    franchise.partners.pull(partnerId);
+    franchise.partners = franchise.partners.filter(
+      (p) => p._id?.toString() !== partnerId?.toString() && p.partnerId?.toString() !== partnerId?.toString()
+    );
     await franchise.save();
 
     return { message: "Partner removed successfully" };
@@ -209,10 +241,8 @@ exports.getFranchiseStatistics = async (franchiseUserId) => {
 
     return {
       totalPartners: franchise.partners.length,
-      pendingPartners: franchise.partners.filter((p) => p.status === "pending")
-        .length,
-      approvedPartners: franchise.partners.filter((p) => p.status === "approved")
-        .length,
+      pendingPartners: franchise.partners.filter((p) => p.status === "pending").length,
+      approvedPartners: franchise.partners.filter((p) => p.status === "approved" || p.status === "active").length,
     };
   } catch (error) {
     throw new Error(`Failed to get statistics: ${error.message}`);
@@ -221,10 +251,14 @@ exports.getFranchiseStatistics = async (franchiseUserId) => {
 
 exports.getPartnersByFranchise = async (franchiseId) => {
   try {
-    const franchise = await FranchisePartner.findOne({ userId: franchiseId });
+    const franchise = await FranchisePartner.findOne({
+      $or: [
+        ...(mongoose.Types.ObjectId.isValid(franchiseId) ? [{ userId: franchiseId }, { _id: franchiseId }] : [{ userId: franchiseId }])
+      ]
+    });
     if (!franchise) throw new Error("Franchise not found");
 
-    return { partners: franchise.partners, total: franchise.partners.length };
+    return { partners: franchise.partners || [], total: (franchise.partners || []).length };
   } catch (error) {
     throw new Error(`Failed to fetch partners: ${error.message}`);
   }
@@ -246,68 +280,143 @@ exports.updateFranchise = async (franchiseId, updateData) => {
   }
 };
 
-// =====================================================================
-
-// exports.getPartnerProfile = async (userId) => {
-//   const partner = await FranchisePartner.findOne({ "partners.partnerId": userId });
-
-//   if (!partner) {
-//     throw new Error("Partner not found");
-//   }
-
-//   // Extract partner specific record from partners array
-//   const partnerRecord = partner.partners.find(
-//     (p) => p.partnerId.toString() === userId.toString()
-//   );
-
-//   return {
-//     userId: partnerRecord.partnerId,
-//     businessName: partnerRecord.businessName,
-//     phone: partnerRecord.phone,
-//     email: partnerRecord.email,
-//     createdAt: partnerRecord.createdAt,
-//   };
-// };
-
-
-
-
+/**
+ * Fetch partner profile (supports embedded partner, top-level partner, and fallback User doc)
+ */
 exports.getPartnerProfile = async (userId) => {
-  const partner = await FranchisePartner.findOne({
-    "partners.partnerId": new mongoose.Types.ObjectId(userId),
-  });
+  try {
+    let partnerRecord = null;
 
-  if (!partner) {
-    throw new Error("Partner not found");
+    // 1. Try finding within embedded partners array in Franchise
+    let partnerDoc = null;
+    if (mongoose.Types.ObjectId.isValid(userId)) {
+      partnerDoc = await FranchisePartner.findOne({
+        "partners.partnerId": new mongoose.Types.ObjectId(userId),
+      });
+    } else {
+      partnerDoc = await FranchisePartner.findOne({
+        "partners.partnerId": userId,
+      });
+    }
+
+    if (partnerDoc && partnerDoc.partners) {
+      partnerRecord = partnerDoc.partners.find(
+        (p) => p.partnerId?.toString() === userId.toString()
+      );
+    }
+
+    // 2. Try finding top-level FranchisePartner document with role: 'partner'
+    if (!partnerRecord) {
+      const topLevelPartner = await FranchisePartner.findOne({
+        userId: mongoose.Types.ObjectId.isValid(userId) ? new mongoose.Types.ObjectId(userId) : userId,
+        role: "partner"
+      });
+      if (topLevelPartner) {
+        partnerRecord = {
+          partnerId: topLevelPartner.userId,
+          businessName: topLevelPartner.franchiseDetails?.businessName || "Channel Partner",
+          phone: topLevelPartner.franchiseDetails?.phone || "",
+          email: topLevelPartner.franchiseDetails?.email || "",
+          createdAt: topLevelPartner.createdAt
+        };
+      }
+    }
+
+    // 3. Fallback to User document
+    if (!partnerRecord) {
+      const user = await User.findById(userId);
+      if (user) {
+        partnerRecord = {
+          partnerId: user._id,
+          businessName: user.name || "Channel Partner",
+          phone: user.phoneNumber || "",
+          email: user.email,
+          createdAt: user.createdAt
+        };
+      }
+    }
+
+    if (!partnerRecord) {
+      throw new Error("Partner not found");
+    }
+
+    return {
+      userId: partnerRecord.partnerId || userId,
+      businessName: partnerRecord.businessName || "Channel Partner",
+      phone: partnerRecord.phone || "",
+      email: partnerRecord.email || "",
+      createdAt: partnerRecord.createdAt || new Date(),
+    };
+  } catch (error) {
+    throw new Error(`Failed to fetch partner profile: ${error.message}`);
   }
-
-  // Extract partner specific record from partners array
-  const partnerRecord = partner.partners.find(
-    (p) => p.partnerId.toString() === userId.toString()
-  );
-
-  return {
-    userId: partnerRecord.partnerId,
-    businessName: partnerRecord.businessName,
-    phone: partnerRecord.phone,
-    email: partnerRecord.email,
-    createdAt: partnerRecord.createdAt,
-  };
 };
 
 /**
- * Fetch all customers created by this partner
+ * Fetch all customers created by this partner (queries User and Card models with createdBy)
  */
 exports.getCustomersByPartner = async (partnerUserId) => {
-  // TODO – replace this with actual Customer model when available
-  // For now return empty list so the dashboard works
-  return {
-    customers: [],
-    total: 0,
-  };
-};
+  try {
+    const Card = require("../models/card.model");
 
-// module.exports = {
-//   getPartnerProfile,
-//   getCustomersByPartner,
-// };
+    const objectId = mongoose.Types.ObjectId.isValid(partnerUserId)
+      ? new mongoose.Types.ObjectId(partnerUserId)
+      : null;
+
+    if (!objectId) return { customers: [], total: 0 };
+
+    // Query users created by this partner
+    const users = await User.find({ createdBy: objectId }).select("-password");
+
+    // Query cards created by this partner
+    const cards = await Card.find({ createdBy: objectId });
+
+    const customerMap = new Map();
+
+    users.forEach((u) => {
+      customerMap.set(u._id.toString(), {
+        _id: u._id,
+        customerId: `CUST-${u._id.toString().slice(-6).toUpperCase()}`,
+        firstName: u.name?.split(" ")[0] || "Customer",
+        lastName: u.name?.split(" ").slice(1).join(" ") || "",
+        businessName: u.name || "Customer",
+        email: u.email,
+        phones: u.phoneNumber ? [{ number: u.phoneNumber }] : [],
+        accountType: u.role || "customer",
+        status: u.isActive ? "active" : "pending",
+        createdAt: u.createdAt,
+      });
+    });
+
+    cards.forEach((c) => {
+      const cardName = c.cardDetails?.name || c.personalDetails?.name || "Client";
+      const cardEmail = c.cardDetails?.email || (c.contactDetails?.emails && c.contactDetails.emails[0]?.address) || "";
+      const cardPhones = c.contactDetails?.phones || [];
+      const idKey = c.userId ? c.userId.toString() : c._id.toString();
+
+      if (!customerMap.has(idKey)) {
+        customerMap.set(idKey, {
+          _id: c._id,
+          customerId: `CARD-${c._id.toString().slice(-6).toUpperCase()}`,
+          firstName: cardName.split(" ")[0] || "Client",
+          lastName: cardName.split(" ").slice(1).join(" ") || "",
+          businessName: c.cardDetails?.companyName || cardName,
+          email: cardEmail,
+          phones: cardPhones,
+          accountType: c.cardType || "Standard",
+          status: c.isActive !== false ? "active" : "pending",
+          createdAt: c.createdAt,
+        });
+      }
+    });
+
+    const customers = Array.from(customerMap.values());
+    return {
+      customers,
+      total: customers.length,
+    };
+  } catch (error) {
+    console.error("Error fetching customers by partner:", error);
+    return { customers: [], total: 0 };
+  }
+};

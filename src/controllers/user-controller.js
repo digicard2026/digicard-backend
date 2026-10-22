@@ -79,7 +79,7 @@ const UserSubscription = require("../models/user-subscription.model");
 // -------------------- SIGN UP --------------------
 exports.signUp = async (req, res) => {
   try {
-    const { email, password, confirmPassword, selectedPlan, selectedAddons, billingCycle } = req.body;
+    const { email, password, confirmPassword, selectedPlan, selectedAddons, billingCycle, createdBy } = req.body;
 
     if (!email || !password || !confirmPassword)
       return res.status(400).json({ error: "Email, password, and confirm password are required." });
@@ -96,8 +96,8 @@ exports.signUp = async (req, res) => {
     if (password !== confirmPassword)
       return res.status(400).json({ error: "Passwords do not match." });
 
-    // createUser service handles duplicate email, password hashing, and subscription initialization
-    const user = await createUser({ email, password, selectedPlan, selectedAddons, billingCycle });
+    // createUser service handles duplicate email, password hashing, createdBy attribution, and subscription initialization
+    const user = await createUser({ email, password, selectedPlan, selectedAddons, billingCycle, createdBy });
 
 
     //  await sendVerificationEmail(user);===temporary disabled
@@ -436,9 +436,27 @@ exports.updateUserRoleAndComplete = async (req, res) => {
 
     if (!id) return res.status(400).json({ message: "User ID is required" });
 
+    // Close privilege escalation vulnerability:
+    // Disallow elevating to 'admin' unless caller is already an authenticated admin
+    if (role === "admin") {
+      if (!req.user || req.user.role !== "admin") {
+        return res.status(403).json({ message: "Forbidden: Cannot assign admin role without admin privileges" });
+      }
+    }
+
+    // Only allow known platform roles
+    const allowedRoles = ["partner", "franchise", "customer", "admin", ""];
+    if (role !== undefined && !allowedRoles.includes(role)) {
+      return res.status(400).json({ message: "Invalid role specified" });
+    }
+
+    const updateFields = {};
+    if (role !== undefined) updateFields.role = role;
+    if (typeof registrationComplete === "boolean") updateFields.registrationComplete = registrationComplete;
+
     const updatedUser = await User.findByIdAndUpdate(
       id,
-      { $set: { role, registrationComplete } },
+      { $set: updateFields },
       { new: true }
     );
 
@@ -446,7 +464,12 @@ exports.updateUserRoleAndComplete = async (req, res) => {
 
     res.status(200).json({
       message: "User role and registration status updated successfully",
-      user: updatedUser,
+      user: {
+        _id: updatedUser._id,
+        email: updatedUser.email,
+        role: updatedUser.role,
+        registrationComplete: updatedUser.registrationComplete
+      },
     });
   } catch (error) {
     console.error("Error updating user:", error);

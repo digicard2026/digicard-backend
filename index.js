@@ -42,6 +42,9 @@ app.use(cors({
 }))
 app.use(express.json({ limit: '50mb' }))
 app.use(cookieParser({ limit: '50mb', extended: true }));
+
+// Serve static uploads for KYC documents, receipts, and proofs
+app.use('/uploads', express.static(path.join(__dirname, 'src/uploads')));
 connectDB();
 
 app.get("/api/v1", (req, res) => {
