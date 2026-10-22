@@ -23,27 +23,11 @@ router.post("/seed", async (req, res) => {
 // Get all plans (with optional duration or category filter)
 router.get("/", async (req, res) => {
   try {
-    const defaultPlans = buildPlanDocuments();
-    for (const p of defaultPlans) {
-      await Plan.findOneAndUpdate(
-        { name: p.name, duration: p.duration },
-        { 
-          $set: {
-            allowedFields: p.allowedFields,
-            features: p.features,
-            requiredFields: p.requiredFields,
-            displayName: p.displayName,
-            category: p.category,
-            categoryGroup: p.categoryGroup,
-            price: p.price,
-            monthlyPrice: p.monthlyPrice,
-            yearlyPrice: p.yearlyPrice,
-            availableAddons: p.availableAddons,
-            isActive: true
-          }
-        },
-        { upsert: true, new: true }
-      );
+    // Only seed initial default plans if collection is completely empty
+    const existingCount = await Plan.countDocuments();
+    if (existingCount === 0) {
+      const defaultPlans = buildPlanDocuments();
+      await Plan.insertMany(defaultPlans);
     }
 
     const { duration, category, name } = req.query;
@@ -65,6 +49,18 @@ router.get("/", async (req, res) => {
   }
 });
 
+// Create dynamic new plan
+router.post("/", async (req, res) => {
+  try {
+    const planData = req.body;
+    const newPlan = new Plan(planData);
+    const saved = await newPlan.save();
+    res.status(201).json({ success: true, data: saved });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
 // Get plan by ID
 router.get("/:id", async (req, res) => {
   try {
@@ -73,6 +69,40 @@ router.get("/:id", async (req, res) => {
       return res.status(404).json({ success: false, message: "Plan not found" });
     }
     res.json(plan);
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Update dynamic plan
+router.put("/:id", async (req, res) => {
+  try {
+    const updated = await Plan.findByIdAndUpdate(
+      req.params.id,
+      { $set: req.body },
+      { new: true, runValidators: true }
+    );
+    if (!updated) {
+      return res.status(404).json({ success: false, message: "Plan not found" });
+    }
+    res.json({ success: true, data: updated });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+// Deactivate or delete plan
+router.delete("/:id", async (req, res) => {
+  try {
+    const deleted = await Plan.findByIdAndUpdate(
+      req.params.id,
+      { $set: { isActive: false } },
+      { new: true }
+    );
+    if (!deleted) {
+      return res.status(404).json({ success: false, message: "Plan not found" });
+    }
+    res.json({ success: true, message: "Plan deactivated successfully" });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

@@ -3,7 +3,8 @@ const {
   getSubscriptionWithDetails,
   getUserSubscriptionHistory,
   canUserSubscribe,
-   getUserPlanDetailsByUserId
+  getUserPlanDetailsByUserId,
+  updateUserSubscriptionPlan
 } = require("../services/subscription-service");
 
 // Your existing function - unchanged
@@ -125,6 +126,39 @@ exports.getUserPlanDetails = async (req, res) => {
     });
   }
 };
+
+exports.updateUserPlan = async (req, res) => {
+  try {
+    const { userId, email, planName, planCategory, billingCycle, price, selectedAddons } = req.body;
+    const effectiveUserId = (req.user && req.user.id) || userId;
+
+    if (!effectiveUserId && !email) {
+      return res.status(400).json({
+        success: false,
+        message: "User identifier (userId or email) is required",
+      });
+    }
+
+    const result = await updateUserSubscriptionPlan({
+      userId: effectiveUserId,
+      email,
+      planName,
+      planCategory,
+      billingCycle,
+      price,
+      selectedAddons,
+    });
+
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error("Update User Plan Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
 
 
 
