@@ -166,7 +166,8 @@
 
 // =========================================
 const jwt = require("jsonwebtoken");
- 
+const User = require("../models/user.model");
+
 const auth = (req, res, next) => {
   try {
     // Read token from cookies OR authorization header
@@ -190,23 +191,52 @@ const auth = (req, res, next) => {
     };
 
     next();
-
   } catch (error) {
-
     console.error("Auth Middleware Error:", error);
-
     return res.status(401).json({
-
       success: false,
-
       message: "Invalid or expired token",
-
     });
-
   }
-
 };
- 
-module.exports = auth;
 
- 
+const isAdmin = async (req, res, next) => {
+  try {
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      });
+    }
+
+    // Fast-path: Check role already decoded from verified JWT
+    if (req.user.role === "admin") {
+      return next();
+    }
+
+    // Fallback: Check role in database
+    const user = await User.findById(req.user.id).select("role isActive");
+    if (!user || user.role !== "admin") {
+      return res.status(403).json({
+        success: false,
+        message: "Access forbidden: Admin privilege required",
+      });
+    }
+
+    req.user.role = user.role;
+    next();
+  } catch (error) {
+    console.error("isAdmin Middleware Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error validating admin privileges",
+    });
+  }
+};
+
+auth.auth = auth;
+auth.isAdmin = isAdmin;
+
+module.exports = auth;
+module.exports.auth = auth;
+module.exports.isAdmin = isAdmin;

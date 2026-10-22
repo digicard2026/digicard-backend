@@ -56,14 +56,18 @@ exports.dashboardStats = async () => {
 
 /* Franchise Table */
 exports.getFranchises = async () => {
-  const franchises = await Franchise.find();
+  const franchises = await Franchise.find({ role: "franchise" });
 
   return franchises.map((f) => ({
     id: f._id,
-    name: f.franchiseDetails.businessName,
-    location: `${f.franchiseDetails.city}, ${f.franchiseDetails.state}`,
-    status: f.franchiseDetails.status,
-    manager: `${f.franchiseDetails.firstName} ${f.franchiseDetails.lastName}`,
+    name: f.franchiseDetails?.businessName || "N/A",
+    location: f.franchiseDetails?.city && f.franchiseDetails?.state
+      ? `${f.franchiseDetails.city}, ${f.franchiseDetails.state}`
+      : "N/A",
+    status: f.franchiseDetails?.status || "pending",
+    manager: (f.franchiseDetails?.firstName || f.franchiseDetails?.lastName)
+      ? `${f.franchiseDetails?.firstName || ""} ${f.franchiseDetails?.lastName || ""}`.trim()
+      : "N/A",
     joined: f.createdAt,
     customers: 0,
     cardsIssued: 0,
