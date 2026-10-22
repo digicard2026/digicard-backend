@@ -105,7 +105,14 @@ exports.signUp = async (req, res) => {
 
     // -------------------- RESPONSE --------------------
     return res.status(201).json({
+      success: true,
       message: "User registered successfully. Please check your email to verify your account.",
+      data: {
+        _id: user._id,
+        email: user.email,
+        role: user.role,
+        registrationComplete: user.registrationComplete,
+      },
       user: {
         _id: user._id,
         email: user.email,
