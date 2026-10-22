@@ -325,6 +325,7 @@ exports.verifyUser = async (req, res) => {
 
     res.status(200).json({
       success: true,
+      token,
       user_id: user._id.toString(),
       role: user.role || null,
       registrationComplete: user.registrationComplete || false,

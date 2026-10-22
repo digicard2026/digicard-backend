@@ -6,7 +6,8 @@ const {
   getSubscriptionDetails,
   getSubscriptionHistory,
   checkSubscriptionEligibility,
-  getUserPlanDetails
+  getUserPlanDetails,
+  updateUserPlan
 } = require("../controllers/subscription-controller");
 
 const auth = require("../middlewares/auth-middleware");
@@ -19,6 +20,7 @@ router.get("/details", auth, getSubscriptionDetails);
 router.get("/history", auth, getSubscriptionHistory);
 router.get("/check-eligibility", auth, checkSubscriptionEligibility);
 router.get("/user-plan/:userId", getUserPlanDetails);
+router.post("/update-user-plan", updateUserPlan);
 
 module.exports = router;
 
