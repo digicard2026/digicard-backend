@@ -47,6 +47,9 @@ const businessAllowed = [
 // BusinessPremium Allowed Fields (Tier 3: Business + Inquiries, Interactive Elements & Service Areas)
 const businessPremiumAllowed = [
   ...businessAllowed,
+  'serviceArea',
+  'serviceAvailability',
+  'customerInquiry',
   'interactiveElements',
   'individualProductDisplay',
   'clientList',
