@@ -4,9 +4,46 @@ const SubscriptionPlan = require("../models/subscriptionPlan.model");
 const Plan = require("../models/plan.model");
 const User = require("../models/user.model");
 
+const MASTER_PLANS = {
+  personal: { name: 'Personal', displayName: 'DI - Individuals', category: 'personal' },
+  business: { name: 'Business', displayName: 'DI - Working Professional', category: 'business' },
+  businesspremium: { name: 'BusinessPremium', displayName: 'DI - Service Providers', category: 'business premium' },
+  professionals: { name: 'Professionals', displayName: 'DI - Professionals', category: 'professionals' },
+  professionalpro: { name: 'ProfessionalPro', displayName: 'DI - Professional Pro', category: 'professionalpro' },
+  entrepreneurials: { name: 'Entrepreneurials', displayName: 'DI - Entrepreneurials', category: 'entrepreneurials' },
+  entrepreneurialsmulti: { name: 'EntrepreneurialsMulti', displayName: 'DI - Multi-Activities', category: 'entrepreneurialsmulti' },
+  corporatebusiness: { name: 'CorporateBusiness', displayName: 'DI - Business', category: 'corporatebusiness' },
+  team: { name: 'Team', displayName: 'DI - Team', category: 'team' },
+  miniwebsite: { name: 'MiniWebsite', displayName: 'DP - Mini Website', category: 'miniwebsite' }
+};
+
+const normalizePlanKey = (raw = "") => {
+  if (!raw) return "personal";
+  const cleaned = String(raw).replace(/[\s\-_]/g, '').toLowerCase();
+  if (cleaned === "free") return "free";
+  if (cleaned.includes("miniwebsite") || cleaned.includes("website")) return "miniwebsite";
+  if (cleaned.includes("team")) return "team";
+  if (cleaned.includes("corporate")) return "corporatebusiness";
+  if (cleaned.includes("multiactivit") || cleaned.includes("multi")) return "entrepreneurialsmulti";
+  if (cleaned.includes("entrepreneur")) return "entrepreneurials";
+  if (cleaned.includes("professionalpro")) return "professionalpro";
+  if (cleaned.includes("workingprofessional") || cleaned.includes("working")) return "business";
+  if (cleaned.includes("professional")) return "professionals";
+  if (cleaned.includes("serviceprovider") || cleaned.includes("businesspremium") || cleaned.includes("premium")) return "businesspremium";
+  if (cleaned.includes("business")) return "business";
+  if (cleaned.includes("personal") || cleaned.includes("individual")) return "personal";
+  return "personal";
+};
+
 // Get active subscription status with full plan details
 exports.getUserSubscriptionStatus = async (userId) => {
-  const subscription = await UserSubscription.findOne({ userId })
+  let queryUserId = userId;
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    const user = await User.findOne({ email: String(userId).trim().toLowerCase() });
+    if (user) queryUserId = user._id;
+  }
+
+  const subscription = await UserSubscription.findOne({ userId: queryUserId })
     .sort({ createdAt: -1 })
     .populate("planId");
 
@@ -25,11 +62,15 @@ exports.getUserSubscriptionStatus = async (userId) => {
 
   const isExpired = diffMs <= 0;
 
-  const resolvedPlanName =
+  const rawKey =
     subscription.planName ||
     (subscription.planId && (subscription.planId.displayName || subscription.planId.name)) ||
     subscription.planCategory ||
     "Personal";
+
+  const canonicalKey = normalizePlanKey(rawKey);
+  const master = MASTER_PLANS[canonicalKey] || MASTER_PLANS.personal;
+  const resolvedPlanName = master.name;
 
   const resolvedPrice =
     subscription.amountPaid ||
@@ -41,7 +82,8 @@ exports.getUserSubscriptionStatus = async (userId) => {
     planId: subscription.planId?._id || subscription.planId,
     planName: resolvedPlanName,
     planType: resolvedPlanName,
-    planCategory: subscription.planCategory || (subscription.planId && subscription.planId.category) || "personal",
+    planDisplayName: master.displayName,
+    planCategory: subscription.planCategory || (subscription.planId && subscription.planId.category) || master.category,
     price: resolvedPrice,
     subscriptionPlanId: subscription.subscriptionPlanId,
     startDate: subscription.startDate,
@@ -154,8 +196,14 @@ exports.canUserSubscribe = async (userId) => {
 };
 
 exports.getUserPlanDetailsByUserId = async (userId) => {
+  let queryUserId = userId;
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    const user = await User.findOne({ email: String(userId).trim().toLowerCase() });
+    if (user) queryUserId = user._id;
+  }
+
   const subscription = await UserSubscription.findOne({
-    userId,
+    userId: queryUserId,
     status: "active",
   })
     .sort({ createdAt: -1 })
@@ -172,11 +220,19 @@ exports.getUserPlanDetailsByUserId = async (userId) => {
     };
   }
 
+  const rawKey =
+    subscription.planName ||
+    (subscription.planId && (subscription.planId.displayName || subscription.planId.name)) ||
+    subscription.planCategory ||
+    "Personal";
+  const canonicalKey = normalizePlanKey(rawKey);
+  const master = MASTER_PLANS[canonicalKey] || MASTER_PLANS.personal;
+
   // If planId populated exists, return it; otherwise synthesize plan object from subscription details
   const planData = subscription.planId || {
-    name: subscription.planName || "Personal",
-    displayName: subscription.planName || "Personal",
-    category: subscription.planCategory || "personal",
+    name: master.name,
+    displayName: master.displayName,
+    category: master.category,
     price: subscription.amountPaid || 500,
     duration: subscription.duration || "monthly",
     features: [
@@ -216,11 +272,16 @@ exports.updateUserSubscriptionPlan = async ({ userId, email, planName, planCateg
       return { success: false, message: "User not found for plan update" };
     }
 
+    const canonicalKey = normalizePlanKey(planName);
+    const master = MASTER_PLANS[canonicalKey] || MASTER_PLANS.business;
+
     // Lookup plan in database if exists
-    let plan = null;
-    if (planName) {
-      plan = await Plan.findOne({ name: new RegExp(`^${planName}$`, "i") });
-    }
+    let plan = await Plan.findOne({
+      $or: [
+        { name: new RegExp(`^${master.name}$`, "i") },
+        { displayName: new RegExp(`^${master.displayName}$`, "i") }
+      ]
+    });
 
     const durationCycle = billingCycle === "yearly" ? "yearly" : "monthly";
     const durationDays = durationCycle === "yearly" ? 365 : (plan?.durationDays || 30);
@@ -235,14 +296,14 @@ exports.updateUserSubscriptionPlan = async ({ userId, email, planName, planCateg
 
     if (existingSub) {
       existingSub.planId = plan ? plan._id : existingSub.planId;
-      existingSub.planName = plan ? plan.name : (planName || existingSub.planName);
-      existingSub.planCategory = planCategory || (plan ? plan.category : existingSub.planCategory);
+      existingSub.planName = master.name;
+      existingSub.planCategory = master.category;
       existingSub.duration = durationCycle;
       existingSub.startDate = startDate;
       existingSub.endDate = endDate;
       existingSub.status = "active";
       if (price) existingSub.amountPaid = Number(price);
-      if (sanitizedAddons.length > 0) existingSub.purchasedAddons = sanitizedAddons;
+      if (Array.isArray(selectedAddons)) existingSub.purchasedAddons = sanitizedAddons;
       await existingSub.save();
 
       return {
@@ -255,8 +316,8 @@ exports.updateUserSubscriptionPlan = async ({ userId, email, planName, planCateg
       const newSub = await UserSubscription.create({
         userId: queryUserId,
         planId: plan ? plan._id : null,
-        planName: plan ? plan.name : (planName || "Personal"),
-        planCategory: planCategory || (plan ? plan.category : "personal"),
+        planName: master.name,
+        planCategory: master.category,
         duration: durationCycle,
         startDate,
         endDate,

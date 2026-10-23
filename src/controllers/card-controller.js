@@ -51,9 +51,11 @@ const validateAndSanitizeEntitlements = async (cardDetails, userIdentifier = nul
             if (cleaned.includes("multi")) return "EntrepreneurialsMulti";
             if (cleaned.includes("entrepreneur")) return "Entrepreneurials";
             if (cleaned.includes("professionalpro")) return "ProfessionalPro";
+            if (cleaned.includes("workingprofessional") || cleaned.includes("working")) return "Business";
             if (cleaned.includes("professional")) return "Professionals";
             if (cleaned.includes("serviceprovider") || cleaned.includes("businesspremium") || cleaned.includes("premium")) return "BusinessPremium";
             if (cleaned.includes("business")) return "Business";
+            if (cleaned.includes("personal") || cleaned.includes("individual")) return "Personal";
             return "Personal";
         };
 

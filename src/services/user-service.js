@@ -39,14 +39,40 @@ exports.createUser = async ({ email, password, selectedPlan, selectedAddons = []
     // Task 1.4: Initialize UserSubscription upon registration with selected plan and addons
     if (selectedPlan) {
       try {
+        const normalizePlanKey = (raw = "") => {
+          if (!raw) return "Personal";
+          const cleaned = String(raw).replace(/[\s\-_]/g, '').toLowerCase();
+          if (cleaned.includes("miniwebsite") || cleaned.includes("website")) return "MiniWebsite";
+          if (cleaned.includes("team")) return "Team";
+          if (cleaned.includes("corporate")) return "CorporateBusiness";
+          if (cleaned.includes("multiactivit") || cleaned.includes("multi")) return "EntrepreneurialsMulti";
+          if (cleaned.includes("entrepreneur")) return "Entrepreneurials";
+          if (cleaned.includes("professionalpro")) return "ProfessionalPro";
+          if (cleaned.includes("workingprofessional") || cleaned.includes("working")) return "Business";
+          if (cleaned.includes("professional")) return "Professionals";
+          if (cleaned.includes("serviceprovider") || cleaned.includes("businesspremium") || cleaned.includes("premium")) return "BusinessPremium";
+          if (cleaned.includes("business")) return "Business";
+          if (cleaned.includes("personal") || cleaned.includes("individual")) return "Personal";
+          return "Personal";
+        };
+
+        const canonicalPlan = normalizePlanKey(selectedPlan);
         const cycle = billingCycle === "yearly" ? "yearly" : "monthly";
         let plan = await Plan.findOne({
-          name: new RegExp(`^${selectedPlan}$`, "i"),
+          $or: [
+            { name: new RegExp(`^${canonicalPlan}$`, "i") },
+            { displayName: new RegExp(`^${selectedPlan}$`, "i") }
+          ],
           duration: cycle
         });
 
         if (!plan) {
-          plan = await Plan.findOne({ name: new RegExp(`^${selectedPlan}$`, "i") });
+          plan = await Plan.findOne({
+            $or: [
+              { name: new RegExp(`^${canonicalPlan}$`, "i") },
+              { displayName: new RegExp(`^${selectedPlan}$`, "i") }
+            ]
+          });
         }
 
         const startDate = new Date();
