@@ -40,10 +40,8 @@ const businessAllowed = [
   'catalog',
   'catalogPDF',
   'productVideo',
-  'testimonials',
   'nfcSettings',
-  'downloads',
-  'videos'
+  'downloads'
 ];
 
 // BusinessPremium Allowed Fields (Tier 3: Business + Inquiries, Interactive Elements & Service Areas)
@@ -63,7 +61,9 @@ const businessPremiumAllowed = [
 
 // Professionals Allowed Fields (Tier 4: BusinessPremium + Executive Summary & Credentials)
 const professionalsAllowed = [
-  ...businessPremiumAllowed
+  ...businessPremiumAllowed,
+  'testimonials',
+  'videos'
 ];
 
 // ProfessionalPro Allowed Fields (Tier 5: Professionals + Specialized Profiles & Certifications)
@@ -123,10 +123,9 @@ const cardFieldsConfig = {
       'Everything in Personal plan, plus:',
       'Employment Details (Company Name, Designation, Role)',
       'Company Logo, Department & Office Address',
-      'Products / Services Showcase & Portfolio Gallery',
-      'Business Hours & Virtual Number Integration',
-      'Profile Video, Product Video & Testimonials',
-      'Downloadable Catalog [PDF] & Documents'
+      'Products / Services Showcase Overview',
+      'Business Hours & Office Availability',
+      'Add-On Ready (Photo Gallery, Docs Builder, Portfolio, NFC)'
     ],
     allowed: businessAllowed,
     addons: [
