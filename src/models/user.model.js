@@ -47,6 +47,7 @@ const userSchema = new mongoose.Schema(
     // Account Status
     isActive: { type: Boolean, default: true },
     registrationComplete: { type: Boolean, default: false },
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
 
     // Metadata
     createdAt: {

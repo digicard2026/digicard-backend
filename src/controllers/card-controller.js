@@ -746,6 +746,101 @@ exports.getCardByUrlSlug = async (req, res) => {
     }
 };
 
+// OPEN GRAPH - Dynamic Open Graph preview for WhatsApp, Facebook, LinkedIn, Twitter, Telegram
+exports.getCardOgPreview = async (req, res) => {
+    try {
+        const { urlSlug } = req.params;
+        let card = null;
+
+        if (urlSlug) {
+            if (urlSlug.length === 24 && /^[0-9a-fA-F]{24}$/.test(urlSlug)) {
+                card = await cardService.getCardById(urlSlug);
+            }
+            if (!card) {
+                card = await cardService.getCardByUrlSlug(urlSlug);
+            }
+        }
+
+        const fallbackUrl = process.env.FRONTEND_URL || 'https://www.revayah.one';
+        const targetUrl = urlSlug ? `${fallbackUrl}/preview/${urlSlug}` : fallbackUrl;
+        const defaultImage = `${fallbackUrl}/card-og-preview.png`;
+
+        if (!card) {
+            return res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Reva-Yah One | Digital Identity Card</title>
+  <meta property="og:title" content="Reva-Yah One | Digital Identity Card" />
+  <meta property="og:description" content="Hi! Here's my digital identity card. Click to view my profile." />
+  <meta property="og:image" content="${defaultImage}" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:url" content="${targetUrl}" />
+  <meta property="og:type" content="website" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:image" content="${defaultImage}" />
+  <meta http-equiv="refresh" content="0;url=${targetUrl}" />
+</head>
+<body>
+  <script>window.location.href = "${targetUrl}";</script>
+</body>
+</html>`);
+        }
+
+        const fullName = `${card.prefix ? card.prefix + ' ' : ''}${card.firstName || ''} ${card.lastName || ''}`.trim() || 'Digital Identity Card';
+        const jobTitle = card.jobTitle || '';
+        const companyName = card.companyName || '';
+        const title = `${fullName} | Digital Identity Card`;
+        
+        let descParts = [];
+        if (jobTitle) descParts.push(jobTitle);
+        if (companyName) descParts.push(`at ${companyName}`);
+        const roleStr = descParts.length > 0 ? descParts.join(' ') + ' • ' : '';
+        const description = `${roleStr}Hi! Here's my digital identity card. Click to view my profile.`;
+
+        // Primary OG image is the branded digital card preview matching WhatsApp executive card specification
+        const cardImage = defaultImage;
+
+        const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>${fullName} | Digital Identity Card</title>
+  <meta name="description" content="${description}" />
+  
+  <meta property="og:type" content="profile" />
+  <meta property="og:site_name" content="Reva-Yah One" />
+  <meta property="og:title" content="${title}" />
+  <meta property="og:description" content="${description}" />
+  <meta property="og:image" content="${cardImage}" />
+  <meta property="og:image:secure_url" content="${cardImage}" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="${fullName}'s Digital Identity Card" />
+  <meta property="og:url" content="${targetUrl}" />
+
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="${title}" />
+  <meta name="twitter:description" content="${description}" />
+  <meta name="twitter:image" content="${cardImage}" />
+
+  <meta http-equiv="refresh" content="0;url=${targetUrl}" />
+</head>
+<body>
+  <p>Redirecting to <a href="${targetUrl}">${fullName}'s Digital Card</a>...</p>
+  <script>window.location.href = "${targetUrl}";</script>
+</body>
+</html>`;
+
+        res.set('Content-Type', 'text/html');
+        return res.send(html);
+    } catch (error) {
+        console.error("OG Preview Error:", error);
+        return res.redirect(process.env.FRONTEND_URL || 'https://www.revayah.one');
+    }
+};
+
 // CHECK - Check URL availability
 exports.checkUrlAvailability = async (req, res) => {
     try {

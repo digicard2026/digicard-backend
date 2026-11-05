@@ -19,7 +19,7 @@ exports.isValidPassword = (password) =>
   /[!@#$%^&*(),.?":{}|<>]/.test(password);
 
 // Create user & initialize subscription with selected plan and addons
-exports.createUser = async ({ email, password, selectedPlan, selectedAddons = [], billingCycle = "monthly" }) => {
+exports.createUser = async ({ email, password, selectedPlan, selectedAddons = [], billingCycle = "monthly", createdBy = null }) => {
   try {
     const cleanEmail = email.trim().toLowerCase();
 
@@ -34,6 +34,7 @@ exports.createUser = async ({ email, password, selectedPlan, selectedAddons = []
       role: selectedPlan ? "customer" : "",
       isActive: true,
       registrationComplete: true, // TEMPORARY: allows user to login directly
+      createdBy: createdBy || null,
     });
 
     // Task 1.4: Initialize UserSubscription upon registration with selected plan and addons

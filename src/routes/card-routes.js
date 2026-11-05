@@ -32,6 +32,7 @@ router.get('/check-url', cardController.checkUrlAvailability);
 router.get('/check-email', cardController.checkEmailAvailability);
 
 // Public Sharing Routes
+router.get('/og-preview/:urlSlug', cardController.getCardOgPreview);
 router.get('/share/:urlSlug', cardController.getCardByUrlSlug);
 router.get('/public/:shareableLink', cardController.getPublicCard);
 

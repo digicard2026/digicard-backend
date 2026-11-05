@@ -249,6 +249,12 @@ const cardSchema = new mongoose.Schema({
   
   // Product/Service Fields
   servicesProducts: { type: String },
+  serviceArea: { type: String }, // Operational areas, cities, or zones served
+  serviceAvailability: { type: String }, // e.g. On-site, In-Office, Remote, 24x7 Emergency
+  customerInquiry: {
+    isEnabled: { type: Boolean, default: true },
+    title: { type: String, default: 'Request a Service / Inquiry' }
+  },
   brandLabel: { type: String },
   productRangeDisplay: { type: String, enum: ['grid', 'list', 'carousel'], default: 'grid' },
   testimonials: [testimonialSchema],
