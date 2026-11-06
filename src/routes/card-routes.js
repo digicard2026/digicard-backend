@@ -24,6 +24,9 @@ router.post('/create-card', cardUpload, cardController.createCard);
 
 // UPDATE card with Azure Blob Storage file upload (PUT)
 router.put('/update-card/:cardId', cardUpload, cardController.updateCard);
+router.post('/upload-preview-image/:cardId', cardController.uploadCardPreviewImage);
+router.get('/clear-preview-image/:urlSlug', cardController.clearCardPreviewImage);
+router.get('/proxy-image', cardController.proxyImage);
 
 router.get('/types/all', cardController.getAllCardTypes);
 router.get('/types/fields/:cardType', cardController.getCardFieldsByType);
@@ -32,6 +35,10 @@ router.get('/check-url', cardController.checkUrlAvailability);
 router.get('/check-email', cardController.checkEmailAvailability);
 
 // Public Sharing Routes
+router.get('/share-preview/:urlSlug', cardController.getCardSharePreview);
+router.get('/og-preview/:urlSlug', cardController.getCardOgPreview);
+router.get('/og-image/:urlSlug', cardController.getCardOgImage);
+router.get('/share-card/:urlSlug', cardController.getCardOgImage);
 router.get('/share/:urlSlug', cardController.getCardByUrlSlug);
 router.get('/public/:shareableLink', cardController.getPublicCard);
 

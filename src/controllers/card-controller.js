@@ -6,6 +6,20 @@ const UserSubscription = require("../models/user-subscription.model");
 const Plan = require("../models/plan.model");
 const Addon = require("../models/addon.model");
 const User = require("../models/user.model");
+const cardModel = require("../models/card.model");
+const { isSocialCrawler } = require("../utils/crawler-detector");
+const { uploadBase64ToAzure, isBase64DataUrl } = require("../utils/azure-base64-uploader");
+
+// Helper to escape XML characters for SVG & OpenGraph HTML
+const escapeXml = (str) => {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&apos;');
+};
 
 // Server-side entitlement validation checking subscription plan allowedFields & purchasedAddons
 const validateAndSanitizeEntitlements = async (cardDetails, userIdentifier = null) => {
@@ -51,9 +65,11 @@ const validateAndSanitizeEntitlements = async (cardDetails, userIdentifier = nul
             if (cleaned.includes("multi")) return "EntrepreneurialsMulti";
             if (cleaned.includes("entrepreneur")) return "Entrepreneurials";
             if (cleaned.includes("professionalpro")) return "ProfessionalPro";
+            if (cleaned.includes("workingprofessional") || cleaned.includes("working")) return "Business";
             if (cleaned.includes("professional")) return "Professionals";
             if (cleaned.includes("serviceprovider") || cleaned.includes("businesspremium") || cleaned.includes("premium")) return "BusinessPremium";
             if (cleaned.includes("business")) return "Business";
+            if (cleaned.includes("personal") || cleaned.includes("individual")) return "Personal";
             return "Personal";
         };
 
@@ -1123,4 +1139,201 @@ exports.getCustomerByUserId = async (req, res) => {
             error: error.message
         });
     }
+};
+
+// =========================================================================
+
+// =========================================================================
+// WhatsApp & OpenGraph Dynamic Card Preview and Render Endpoints
+// (According to WHATSAPP_RICH_UNFURL_IMPLEMENTATION_PLAN.md)
+// =========================================================================
+
+/**
+ * Serves Open Graph & Twitter Card rich metadata to social media crawlers
+ * (WhatsApp, Telegram, LinkedIn, X/Twitter, Slack, etc.) or redirects humans to interactive card.
+ */
+exports.getCardSharePreview = async (req, res) => {
+  try {
+    const { urlSlug } = req.params;
+    const userAgent = req.headers['user-agent'] || '';
+    const isBot = isSocialCrawler(userAgent);
+
+    let card = await cardService.getCardByUrlSlug(urlSlug);
+    if (!card && /^[0-9a-fA-F]{24}$/.test(urlSlug)) {
+      card = await cardModel.findById(urlSlug).lean();
+    }
+    if (!card) {
+      return res.status(404).send('Card not found');
+    }
+
+    const host = req.get('host') || 'localhost:3000';
+    const proto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+    const dynamicOrigin = `${proto}://${host}`;
+    const isLive = host.includes('revayah.one');
+
+    const frontendUrl = isLive ? (process.env.FRONTEND_URL || 'https://www.revayah.one') : (process.env.FRONTEND_URL && !process.env.FRONTEND_URL.includes('revayah.one') ? process.env.FRONTEND_URL : 'http://localhost:5173');
+    const backendUrl = isLive ? (process.env.BACKEND_URL || 'https://api.revayah.one') : dynamicOrigin;
+    const targetUrl = `${frontendUrl}/preview/${urlSlug}`;
+    const shareUrl = isLive ? `${frontendUrl}/preview/${urlSlug}` : `${dynamicOrigin}/p/${urlSlug}`;
+
+    // Social Crawler & OpenGraph Metadata
+    const fullName = `${card.prefix ? card.prefix + ' ' : ''}${card.firstName || ''} ${card.lastName || ''}`.trim() || card.name || 'Digital Business Card';
+    const jobTitle = card.jobTitle || card.tagline || 'Professional';
+    const company = card.companyName || card.organization || 'Revayah One';
+    const ogTitle = `${fullName} | ${jobTitle}`;
+    const ogDesc = `${company} • Digital Identity Card on Revayah One. Tap to connect via Call, WhatsApp, Email, and view services.`;
+    
+    // Priority: pre-rendered Azure Blob snapshot PNG > dynamic OG image endpoint
+    const ogImage = card.cardPreviewImage || `${backendUrl}/api/v1/card-routes/og-image/${urlSlug}`;
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeXml(ogTitle)}</title>
+  <meta property="og:site_name" content="Revayah One" />
+  <meta property="og:type" content="profile" />
+  <meta property="og:title" content="${escapeXml(ogTitle)}" />
+  <meta property="og:description" content="${escapeXml(ogDesc)}" />
+  <meta property="og:image" content="${escapeXml(ogImage)}" />
+  <meta property="og:image:secure_url" content="${escapeXml(ogImage)}" />
+  <meta property="og:image:type" content="image/png" />
+  <meta property="og:image:width" content="600" />
+  <meta property="og:image:height" content="600" />
+  <meta property="og:url" content="${shareUrl}" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="${escapeXml(ogTitle)}" />
+  <meta name="twitter:description" content="${escapeXml(ogDesc)}" />
+  <meta name="twitter:image" content="${escapeXml(ogImage)}" />
+</head>
+<body>
+  <p>Loading digital identity card for ${escapeXml(fullName)}...</p>
+  <script>
+    // Seamless client-side redirect for human visitors:
+    window.location.replace("${targetUrl}");
+  </script>
+</body>
+</html>`;
+
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    res.set('Cache-Control', 'public, max-age=120');
+    return res.status(200).send(html);
+  } catch (error) {
+    console.error('Error in getCardSharePreview:', error);
+    res.status(500).send('Internal server error');
+  }
+};
+
+// Backwards-compatible alias for getCardSharePreview
+exports.getCardOgPreview = exports.getCardSharePreview;
+
+/**
+ * Image proxy to avoid CORS canvas tainting when snapshotting cards on the frontend
+ */
+exports.proxyImage = async (req, res) => {
+  try {
+    const { url } = req.query;
+    if (!url || typeof url !== 'string' || !url.startsWith('http')) {
+      return res.status(400).send('Invalid url');
+    }
+    const response = await fetch(url);
+    if (!response.ok) {
+      return res.status(response.status).send('Failed to fetch image');
+    }
+    const contentType = response.headers.get('content-type') || 'image/jpeg';
+    const buffer = Buffer.from(await response.arrayBuffer());
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    return res.send(buffer);
+  } catch (err) {
+    console.error('Proxy image error:', err);
+    return res.status(500).send('Proxy error');
+  }
+};
+
+/**
+ * Serves or redirects to the miniature card preview image.
+ * If pre-rendered cardPreviewImage in Azure Blob exists, 302 redirects to it.
+ * Otherwise falls back to the owner's profilePhoto until cardPreviewImage is generated.
+ */
+exports.getCardOgImage = async (req, res) => {
+  try {
+    const { urlSlug } = req.params;
+    let card = await cardService.getCardByUrlSlug(urlSlug);
+    if (!card && /^[0-9a-fA-F]{24}$/.test(urlSlug)) {
+      card = await cardModel.findById(urlSlug).lean();
+    }
+    if (!card) {
+      return res.status(404).send('Card not found');
+    }
+
+    // 1. If pre-rendered full card thumbnail in Azure Blob exists, redirect to it
+    if (card.cardPreviewImage && !card.cardPreviewImage.startsWith('data:') && card.cardPreviewImage.startsWith('http')) {
+      return res.redirect(302, card.cardPreviewImage);
+    }
+
+    // 2. Fallback: profile photo of the card owner
+    if (card.profilePhoto && !card.profilePhoto.startsWith('data:') && card.profilePhoto.startsWith('http')) {
+      return res.redirect(302, card.profilePhoto);
+    }
+
+    return res.status(404).send('Card preview image not generated yet. Open the card preview in browser to generate.');
+  } catch (error) {
+    console.error('Error in getCardOgImage:', error);
+    res.status(500).send('Error generating card image');
+  }
+};
+
+/**
+ * Dedicated endpoint to upload captured cardPreviewImage thumbnail to Azure Blob Storage
+ * and attach it to the Card document for instant <50ms CDN crawler responses.
+ */
+exports.clearCardPreviewImage = async (req, res) => {
+  try {
+    const { urlSlug } = req.params;
+    let query = { urlSlug };
+    if (/^[0-9a-fA-F]{24}$/.test(urlSlug)) {
+      query = { $or: [{ urlSlug }, { _id: urlSlug }] };
+    }
+    const updated = await cardModel.findOneAndUpdate(query, { cardPreviewImage: null }, { new: true });
+    if (!updated) return res.status(404).send('Card not found');
+    return res.send(`Card preview image cleared successfully for ${urlSlug}! Re-open the card preview in browser to re-generate.`);
+  } catch (err) {
+    return res.status(500).send(err.message);
+  }
+};
+
+exports.uploadCardPreviewImage = async (req, res) => {
+  try {
+    const { cardId } = req.params;
+    const { cardPreviewImage } = req.body;
+    if (!cardPreviewImage) {
+      return res.status(400).json({ success: false, message: 'No cardPreviewImage provided' });
+    }
+
+    let imageUrl = cardPreviewImage;
+    if (isBase64DataUrl(cardPreviewImage)) {
+      imageUrl = await uploadBase64ToAzure(cardPreviewImage, 'cardPreviewImage');
+    }
+
+    const updated = await cardModel.findByIdAndUpdate(
+      cardId,
+      { cardPreviewImage: imageUrl },
+      { new: true }
+    );
+
+    if (!updated) {
+      return res.status(404).json({ success: false, message: 'Card not found' });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Card preview image uploaded successfully',
+      cardPreviewImage: imageUrl
+    });
+  } catch (error) {
+    console.error('Error in uploadCardPreviewImage:', error);
+    return res.status(500).json({ success: false, error: error.message });
+  }
 };

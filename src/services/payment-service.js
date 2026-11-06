@@ -77,6 +77,24 @@ const MASTER_PLANS_MAP = {
   miniwebsite: { name: 'MiniWebsite', displayName: 'DP - Mini Website', monthlyPrice: 3000, yearlyPrice: 27000, category: 'miniwebsite', categoryGroup: 'business' }
 };
 
+const normalizePlanKey = (raw = "") => {
+  if (!raw) return "personal";
+  const cleaned = String(raw).replace(/[\s\-_]/g, '').toLowerCase();
+  if (cleaned === "free") return "free";
+  if (cleaned.includes("miniwebsite") || cleaned.includes("website")) return "miniwebsite";
+  if (cleaned.includes("team")) return "team";
+  if (cleaned.includes("corporate")) return "corporatebusiness";
+  if (cleaned.includes("multiactivit") || cleaned.includes("multi")) return "entrepreneurialsmulti";
+  if (cleaned.includes("entrepreneur")) return "entrepreneurials";
+  if (cleaned.includes("professionalpro")) return "professionalpro";
+  if (cleaned.includes("workingprofessional") || cleaned.includes("working")) return "business";
+  if (cleaned.includes("professional")) return "professionals";
+  if (cleaned.includes("serviceprovider") || cleaned.includes("businesspremium") || cleaned.includes("premium")) return "businesspremium";
+  if (cleaned.includes("business")) return "business";
+  if (cleaned.includes("personal") || cleaned.includes("individual")) return "personal";
+  return "personal";
+};
+
 // NEW: Create order with subscription and optional addons
 exports.createOrderWithSubscription = async (
   planId,
@@ -100,23 +118,33 @@ exports.createOrderWithSubscription = async (
       }
     }
 
+    const canonicalKey = normalizePlanKey(cleanPlanName || planName || planId);
+    const masterMeta = MASTER_PLANS_MAP[canonicalKey] || MASTER_PLANS_MAP.business;
+
     // Get plan details (support ObjectId or name)
     let plan = null;
     if (mongoose.Types.ObjectId.isValid(planId)) {
       plan = await Plan.findById(planId);
     }
-    if (!plan && cleanPlanName) {
+    if (!plan && masterMeta) {
       plan = await Plan.findOne({
-        name: new RegExp(`^${cleanPlanName}$`, "i"),
+        $or: [
+          { name: new RegExp(`^${masterMeta.name}$`, "i") },
+          { displayName: new RegExp(`^${masterMeta.displayName}$`, "i") }
+        ],
         duration: isYearly ? "yearly" : "monthly"
       });
       if (!plan) {
-        plan = await Plan.findOne({ name: new RegExp(`^${cleanPlanName}$`, "i") });
+        plan = await Plan.findOne({
+          $or: [
+            { name: new RegExp(`^${masterMeta.name}$`, "i") },
+            { displayName: new RegExp(`^${masterMeta.displayName}$`, "i") }
+          ]
+        });
       }
     }
 
-    // Fallback: If still not in DB, use master catalog and any existing DB plan ID for ref
-    const masterMeta = MASTER_PLANS_MAP[(cleanPlanName || "business").toLowerCase()] || MASTER_PLANS_MAP.business;
+    // Fallback: If still not in DB, synthesize using master catalog and any DB plan ID for ref
     let effectivePlanId = plan?._id;
     if (!effectivePlanId) {
       const anyDbPlan = await Plan.findOne();
@@ -335,26 +363,39 @@ exports.verifyAndActivateSubscription = async (
       }
     }
 
+    const canonicalKey = normalizePlanKey(cleanPlanName || planName || planId);
+    const masterMeta = MASTER_PLANS_MAP[canonicalKey] || MASTER_PLANS_MAP.business;
+
     // Get plan details safely (support ObjectId or plan name)
     let plan = null;
     if (mongoose.Types.ObjectId.isValid(planId)) {
       plan = await Plan.findById(planId);
     }
-    if (!plan && cleanPlanName) {
-      plan = await Plan.findOne({ name: new RegExp(`^${cleanPlanName}$`, "i") });
+    if (!plan && masterMeta) {
+      plan = await Plan.findOne({
+        $or: [
+          { name: new RegExp(`^${masterMeta.name}$`, "i") },
+          { displayName: new RegExp(`^${masterMeta.displayName}$`, "i") }
+        ]
+      });
     }
     if (!plan) {
-      plan = await Plan.findOne();
-    }
-    if (!plan) {
-      return {
-        success: false,
-        message: "Plan not found"
+      const anyDbPlan = await Plan.findOne();
+      const fallbackId = anyDbPlan?._id || new mongoose.Types.ObjectId();
+      plan = {
+        _id: fallbackId,
+        name: masterMeta.name,
+        displayName: masterMeta.displayName,
+        category: masterMeta.category,
+        categoryGroup: masterMeta.categoryGroup,
+        duration: duration || "monthly",
+        durationDays: duration === "yearly" ? 365 : 30,
+        price: duration === "yearly" ? masterMeta.yearlyPrice : masterMeta.monthlyPrice
       };
     }
 
     // Calculate dates
-    const { startDate, endDate } = calculateDates(plan.durationDays || 30);
+    const { startDate, endDate } = calculateDates(plan.durationDays || (duration === "yearly" ? 365 : 30));
 
     // Update SubscriptionPlan
     const subscriptionPlan = await SubscriptionPlan.findOneAndUpdate(
@@ -395,9 +436,9 @@ exports.verifyAndActivateSubscription = async (
       userId: userId,
       planId: plan._id,
       subscriptionPlanId: subscriptionPlan._id,
-      planName: plan.name,
-      planCategory: plan.categoryGroup || plan.category,
-      duration: plan.duration,
+      planName: masterMeta.name || plan.name,
+      planCategory: masterMeta.category || plan.categoryGroup || plan.category,
+      duration: duration || plan.duration || "monthly",
       startDate: startDate,
       endDate: endDate,
       paymentId: razorpay_payment_id,

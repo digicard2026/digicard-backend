@@ -11,6 +11,7 @@ const cookieParser = require('cookie-parser');
 
 const connectDB = require("./src/config/db");
 const app = express();
+app.set('trust proxy', 1);
 
 const bodyParser = require("body-parser"); // Added for email + PDF
 const AzureBlobUtil = require('./src/utils/azureBlobUtil');
@@ -18,6 +19,7 @@ const AzureBlobUtil = require('./src/utils/azureBlobUtil');
 const authRoutes = require('./src/routes/auth-routes');
 const userRoutes = require('./src/routes/user-routes');
 const cardRoutes = require('./src/routes/card-routes');
+const cardController = require('./src/controllers/card-controller');
 //  const digicard =require()
 const franchisePartner = require('./src/routes/franchisePartner-routes')
 const subscriptionRoutes = require('./src/routes/subscription-routes');
@@ -37,7 +39,7 @@ const port = 3000;
 //   credentials: true              
 // })); 
 app.use(cors({
-  origin: ['http://localhost:5173', 'https://www.revayah.one'],
+  origin: (origin, callback) => callback(null, true),
   credentials: true
 }))
 app.use(express.json({ limit: '50mb' }))
@@ -55,6 +57,11 @@ app.get("/api/v1", (req, res) => {
 app.use('/api/v1/user', userRoutes);
 app.use("/api/v1/auth", authRoutes);
 app.use('/api/v1/franchise-partner', franchisePartner);
+
+// Email invoice route
+// Direct smart short-link for card previews & rich unfurl
+app.get('/p/:urlSlug', cardController.getCardSharePreview);
+app.get('/preview/:urlSlug', cardController.getCardSharePreview);
 
 // Email invoice route
 app.use('/api/v1/card-routes', cardRoutes);
