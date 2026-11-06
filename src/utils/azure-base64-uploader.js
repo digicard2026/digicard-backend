@@ -88,6 +88,11 @@ async function processCardBase64Files(cardDetails) {
     return cardDetails;
   }
 
+  // 0. Card Preview Image (Thumbnail for WhatsApp & Social Unfurling)
+  if (cardDetails.cardPreviewImage && isBase64DataUrl(cardDetails.cardPreviewImage)) {
+    cardDetails.cardPreviewImage = await uploadBase64ToAzure(cardDetails.cardPreviewImage, 'cardPreviewImage');
+  }
+
   // 1. Profile Photo
   if (cardDetails.profilePhoto && isBase64DataUrl(cardDetails.profilePhoto)) {
     cardDetails.profilePhoto = await uploadBase64ToAzure(cardDetails.profilePhoto, 'profilePhoto');

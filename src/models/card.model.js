@@ -206,6 +206,7 @@ const cardSchema = new mongoose.Schema({
   lastName: { type: String },
   suffix: { type: String },
   profilePhoto: { type: String },
+  cardPreviewImage: { type: String, default: null },
   
   // Video Fields
   profileVideo: profileVideoSchema,

@@ -1,6 +1,7 @@
 // Base Personal Allowed Fields (Tier 1)
 const personalAllowed = [
   'profilePhoto',
+  'cardPreviewImage',
   'firstName',
   'lastName',
   'prefix',
