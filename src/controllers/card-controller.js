@@ -1154,27 +1154,57 @@ exports.getCustomerByUserId = async (req, res) => {
  */
 exports.getCardSharePreview = async (req, res) => {
   try {
-    const { urlSlug } = req.params;
-    const userAgent = req.headers['user-agent'] || '';
-    const isBot = isSocialCrawler(userAgent);
+    const rawSlug = req.params.urlSlug || req.params.slug || req.query.urlSlug || req.query.slug || req.params[0] || '';
+    const urlSlug = String(rawSlug).replace(/^\/+/, '').split('?')[0].trim();
 
-    let card = await cardService.getCardByUrlSlug(urlSlug);
-    if (!card && /^[0-9a-fA-F]{24}$/.test(urlSlug)) {
-      card = await cardModel.findById(urlSlug).lean();
-    }
-    if (!card) {
-      return res.status(404).send('Card not found');
+    let card = null;
+    if (urlSlug) {
+      if (/^[0-9a-fA-F]{24}$/.test(urlSlug)) {
+        card = await cardModel.findById(urlSlug).lean();
+      }
+      if (!card) {
+        card = await cardModel.findOne({
+          $or: [
+            { urlSlug: urlSlug },
+            { urlSlug: new RegExp(`^${urlSlug}$`, 'i') },
+            { customUrl: urlSlug },
+            { customUrl: new RegExp(`^${urlSlug}$`, 'i') }
+          ]
+        }).lean();
+      }
     }
 
-    const host = req.get('host') || 'localhost:3000';
-    const proto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+    const host = req.get('x-forwarded-host') || req.get('host') || 'www.revayah.one';
+    const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
     const dynamicOrigin = `${proto}://${host}`;
     const isLive = host.includes('revayah.one');
 
     const frontendUrl = isLive ? (process.env.FRONTEND_URL || 'https://www.revayah.one') : (process.env.FRONTEND_URL && !process.env.FRONTEND_URL.includes('revayah.one') ? process.env.FRONTEND_URL : 'http://localhost:5173');
     const backendUrl = isLive ? (process.env.BACKEND_URL || 'https://api.revayah.one') : dynamicOrigin;
-    const targetUrl = `${frontendUrl}/preview/${urlSlug}`;
+    const targetUrl = urlSlug ? `${frontendUrl}/preview/${urlSlug}` : frontendUrl;
     const shareUrl = isLive ? `${frontendUrl}/preview/${urlSlug}` : `${dynamicOrigin}/p/${urlSlug}`;
+
+    if (!card) {
+      const fallbackHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Digital Identity Card | Revayah One</title>
+  <meta property="og:site_name" content="Revayah One" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Digital Identity Card | Revayah One" />
+  <meta property="og:description" content="Connect and view digital identity card on Revayah One." />
+  <meta property="og:image" content="https://www.revayah.one/revayah-logo-small.png" />
+  <meta property="og:url" content="${shareUrl}" />
+</head>
+<body>
+  <p>Loading Revayah One...</p>
+  <script>window.location.replace("${frontendUrl}");</script>
+</body>
+</html>`;
+      res.set('Content-Type', 'text/html; charset=utf-8');
+      return res.status(200).send(fallbackHtml);
+    }
 
     // Social Crawler & OpenGraph Metadata
     const fullName = `${card.prefix ? card.prefix + ' ' : ''}${card.firstName || ''} ${card.lastName || ''}`.trim() || card.name || 'Digital Business Card';
@@ -1183,8 +1213,15 @@ exports.getCardSharePreview = async (req, res) => {
     const ogTitle = `${fullName} | ${jobTitle}`;
     const ogDesc = `${company} • Digital Identity Card on Revayah One. Tap to connect via Call, WhatsApp, Email, and view services.`;
     
-    // Priority: pre-rendered Azure Blob snapshot PNG > dynamic OG image endpoint
-    const ogImage = card.cardPreviewImage || `${backendUrl}/api/v1/card-routes/og-image/${urlSlug}`;
+    // Priority: pre-rendered Azure Blob snapshot PNG > profilePhoto > dynamic OG image endpoint > logo fallback
+    let ogImage = null;
+    if (card.cardPreviewImage && typeof card.cardPreviewImage === 'string' && card.cardPreviewImage.startsWith('http')) {
+      ogImage = card.cardPreviewImage;
+    } else if (card.profilePhoto && typeof card.profilePhoto === 'string' && card.profilePhoto.startsWith('http') && !card.profilePhoto.startsWith('data:')) {
+      ogImage = card.profilePhoto;
+    } else {
+      ogImage = `${backendUrl}/api/v1/card-routes/og-image/${urlSlug}`;
+    }
 
     const html = `<!DOCTYPE html>
 <html lang="en">
@@ -1259,29 +1296,40 @@ exports.proxyImage = async (req, res) => {
  */
 exports.getCardOgImage = async (req, res) => {
   try {
-    const { urlSlug } = req.params;
-    let card = await cardService.getCardByUrlSlug(urlSlug);
-    if (!card && /^[0-9a-fA-F]{24}$/.test(urlSlug)) {
-      card = await cardModel.findById(urlSlug).lean();
-    }
-    if (!card) {
-      return res.status(404).send('Card not found');
+    const rawSlug = req.params.urlSlug || req.params.slug || req.query.urlSlug || req.query.slug || req.params[0] || '';
+    const urlSlug = String(rawSlug).replace(/^\/+/, '').split('?')[0].trim();
+
+    let card = null;
+    if (urlSlug) {
+      if (/^[0-9a-fA-F]{24}$/.test(urlSlug)) {
+        card = await cardModel.findById(urlSlug).lean();
+      }
+      if (!card) {
+        card = await cardModel.findOne({
+          $or: [
+            { urlSlug: urlSlug },
+            { urlSlug: new RegExp(`^${urlSlug}$`, 'i') },
+            { customUrl: urlSlug },
+            { customUrl: new RegExp(`^${urlSlug}$`, 'i') }
+          ]
+        }).lean();
+      }
     }
 
     // 1. If pre-rendered full card thumbnail in Azure Blob exists, redirect to it
-    if (card.cardPreviewImage && !card.cardPreviewImage.startsWith('data:') && card.cardPreviewImage.startsWith('http')) {
+    if (card && card.cardPreviewImage && !card.cardPreviewImage.startsWith('data:') && card.cardPreviewImage.startsWith('http')) {
       return res.redirect(302, card.cardPreviewImage);
     }
 
     // 2. Fallback: profile photo of the card owner
-    if (card.profilePhoto && !card.profilePhoto.startsWith('data:') && card.profilePhoto.startsWith('http')) {
+    if (card && card.profilePhoto && !card.profilePhoto.startsWith('data:') && card.profilePhoto.startsWith('http')) {
       return res.redirect(302, card.profilePhoto);
     }
 
-    return res.status(404).send('Card preview image not generated yet. Open the card preview in browser to generate.');
+    return res.redirect(302, 'https://www.revayah.one/revayah-logo-small.png');
   } catch (error) {
     console.error('Error in getCardOgImage:', error);
-    res.status(500).send('Error generating card image');
+    return res.redirect(302, 'https://www.revayah.one/revayah-logo-small.png');
   }
 };
 
@@ -1291,10 +1339,11 @@ exports.getCardOgImage = async (req, res) => {
  */
 exports.clearCardPreviewImage = async (req, res) => {
   try {
-    const { urlSlug } = req.params;
-    let query = { urlSlug };
+    const rawSlug = req.params.urlSlug || req.params.slug || req.query.urlSlug || '';
+    const urlSlug = String(rawSlug).replace(/^\/+/, '').trim();
+    let query = { $or: [{ urlSlug: urlSlug }, { urlSlug: new RegExp(`^${urlSlug}$`, 'i') }, { customUrl: urlSlug }] };
     if (/^[0-9a-fA-F]{24}$/.test(urlSlug)) {
-      query = { $or: [{ urlSlug }, { _id: urlSlug }] };
+      query.$or.push({ _id: urlSlug });
     }
     const updated = await cardModel.findOneAndUpdate(query, { cardPreviewImage: null }, { new: true });
     if (!updated) return res.status(404).send('Card not found');
@@ -1317,8 +1366,13 @@ exports.uploadCardPreviewImage = async (req, res) => {
       imageUrl = await uploadBase64ToAzure(cardPreviewImage, 'cardPreviewImage');
     }
 
-    const updated = await cardModel.findByIdAndUpdate(
-      cardId,
+    let query = { _id: cardId };
+    if (!/^[0-9a-fA-F]{24}$/.test(cardId)) {
+      query = { $or: [{ urlSlug: cardId }, { customUrl: cardId }] };
+    }
+
+    const updated = await cardModel.findOneAndUpdate(
+      query,
       { cardPreviewImage: imageUrl },
       { new: true }
     );
