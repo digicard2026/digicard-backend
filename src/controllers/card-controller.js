@@ -1229,7 +1229,7 @@ exports.getCardSharePreview = async (req, res) => {
   <meta charset="utf-8" />
   <title>${escapeXml(ogTitle)}</title>
   <meta property="og:site_name" content="Revayah One" />
-  <meta property="og:type" content="profile" />
+  <meta property="og:type" content="website" />
   <meta property="og:title" content="${escapeXml(ogTitle)}" />
   <meta property="og:description" content="${escapeXml(ogDesc)}" />
   <meta property="og:image" content="${escapeXml(ogImage)}" />
@@ -1363,7 +1363,7 @@ exports.uploadCardPreviewImage = async (req, res) => {
 
     let imageUrl = cardPreviewImage;
     if (isBase64DataUrl(cardPreviewImage)) {
-      imageUrl = await uploadBase64ToAzure(cardPreviewImage, 'cardPreviewImage');
+      imageUrl = await uploadBase64ToAzure(cardPreviewImage, 'miniCardSnapshot');
     }
 
     let query = { _id: cardId };
