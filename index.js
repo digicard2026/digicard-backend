@@ -92,6 +92,7 @@ app.listen(port, () => {
 
     if (isConnected) {
       console.log("✅ Azure Blob Storage connection successful");
+      await azureBlobUtil.ensureCorsRules();
     } else {
       console.log("❌ Failed to connect to Azure Blob Storage");
     }
