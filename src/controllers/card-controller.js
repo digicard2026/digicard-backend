@@ -1433,7 +1433,14 @@ exports.uploadCardPreviewImage = async (req, res) => {
 
     let query = { _id: cardId };
     if (!/^[0-9a-fA-F]{24}$/.test(cardId)) {
-      query = { $or: [{ urlSlug: cardId }, { customUrl: cardId }] };
+      query = {
+        $or: [
+          { urlSlug: cardId },
+          { urlSlug: new RegExp(`^${cardId}$`, 'i') },
+          { customUrl: cardId },
+          { customUrl: new RegExp(`^${cardId}$`, 'i') }
+        ]
+      };
     }
 
     const updated = await cardModel.findOneAndUpdate(
