@@ -39,6 +39,28 @@ class AzureBlobUtil {
     }
   }
 
+  // Automatically configure CORS on Azure Storage so frontend html-to-image can snapshot card without CORS errors
+  async ensureCorsRules() {
+    try {
+      await this.blobServiceClient.setProperties({
+        cors: [
+          {
+            allowedOrigins: '*',
+            allowedMethods: 'GET,HEAD,OPTIONS,PUT,POST',
+            allowedHeaders: '*',
+            exposedHeaders: '*',
+            maxAgeInSeconds: 86400,
+          }
+        ]
+      });
+      console.log('✅ Azure Blob Storage CORS configured successfully (* allowed)');
+      return true;
+    } catch (err) {
+      console.warn('⚠️ Azure Blob CORS auto-config notice:', err.message);
+      return false;
+    }
+  }
+
   // Upload file content (Buffer or string) to specified container and blob
   async uploadFile(containerName, blobName, fileContent, contentType = 'application/octet-stream') {
     try {

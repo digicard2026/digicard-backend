@@ -62,6 +62,8 @@ app.use('/api/v1/franchise-partner', franchisePartner);
 // Direct smart short-link for card previews & rich unfurl
 app.get('/p/:urlSlug', cardController.getCardSharePreview);
 app.get('/preview/:urlSlug', cardController.getCardSharePreview);
+app.get('/og-image/:urlSlug', cardController.getCardOgImage);
+app.get('/api/v1/card-routes/og-image/:urlSlug', cardController.getCardOgImage);
 
 // Email invoice route
 app.use('/api/v1/card-routes', cardRoutes);
@@ -92,6 +94,7 @@ app.listen(port, () => {
 
     if (isConnected) {
       console.log("✅ Azure Blob Storage connection successful");
+      await azureBlobUtil.ensureCorsRules();
     } else {
       console.log("❌ Failed to connect to Azure Blob Storage");
     }

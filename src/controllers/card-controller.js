@@ -1,5 +1,6 @@
 const cardService = require("../services/card-service");
 const path = require("path");
+const fs = require("fs");
 const { processCardBase64Files } = require("../utils/azure-base64-uploader");
 const cardFieldsConfig = require("../config/cardFieldsConfig");
 const UserSubscription = require("../models/user-subscription.model");
@@ -1175,14 +1176,17 @@ exports.getCardSharePreview = async (req, res) => {
     }
 
     const host = req.get('x-forwarded-host') || req.get('host') || 'www.revayah.one';
-    const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+    const isLocalhost = host.includes('localhost') || host.includes('127.0.0.1');
+    // Social media crawlers (WhatsApp, LinkedIn, Twitter) require HTTPS for og:image and og:url.
+    // If not purely local, always use HTTPS so crawlers don't reject mixed HTTP/HTTPS content.
+    const proto = isLocalhost ? (req.headers['x-forwarded-proto'] || req.protocol || 'http') : 'https';
     const dynamicOrigin = `${proto}://${host}`;
     const isLive = host.includes('revayah.one');
 
     const frontendUrl = isLive ? (process.env.FRONTEND_URL || 'https://www.revayah.one') : (process.env.FRONTEND_URL && !process.env.FRONTEND_URL.includes('revayah.one') ? process.env.FRONTEND_URL : 'http://localhost:5173');
     const backendUrl = isLive ? (process.env.BACKEND_URL || 'https://api.revayah.one') : dynamicOrigin;
     const targetUrl = urlSlug ? `${frontendUrl}/preview/${urlSlug}` : frontendUrl;
-    const shareUrl = isLive ? `${frontendUrl}/preview/${urlSlug}` : `${dynamicOrigin}/p/${urlSlug}`;
+    const shareUrl = isLive ? `${frontendUrl}/preview/${urlSlug}` : `${dynamicOrigin}/preview/${urlSlug}`;
 
     if (!card) {
       const fallbackHtml = `<!DOCTYPE html>
@@ -1215,12 +1219,20 @@ exports.getCardSharePreview = async (req, res) => {
     
     // Priority: pre-rendered Azure Blob snapshot PNG > profilePhoto > dynamic OG image endpoint > logo fallback
     let ogImage = null;
+    let ogImageType = 'image/jpeg';
     if (card.cardPreviewImage && typeof card.cardPreviewImage === 'string' && card.cardPreviewImage.startsWith('http')) {
       ogImage = card.cardPreviewImage;
+      ogImageType = card.cardPreviewImage.endsWith('.png') ? 'image/png' : 'image/jpeg';
     } else if (card.profilePhoto && typeof card.profilePhoto === 'string' && card.profilePhoto.startsWith('http') && !card.profilePhoto.startsWith('data:')) {
       ogImage = card.profilePhoto;
+      ogImageType = card.profilePhoto.endsWith('.png') ? 'image/png' : 'image/jpeg';
+    } else if (card.profilePhoto && typeof card.profilePhoto === 'string' && (card.profilePhoto.startsWith('/uploads/') || card.profilePhoto.startsWith('uploads/'))) {
+      const cleanPath = card.profilePhoto.startsWith('/') ? card.profilePhoto : `/${card.profilePhoto}`;
+      ogImage = `${backendUrl}${cleanPath}`;
+      ogImageType = cleanPath.endsWith('.png') ? 'image/png' : 'image/jpeg';
     } else {
-      ogImage = `${backendUrl}/api/v1/card-routes/og-image/${urlSlug}`;
+      ogImage = `${backendUrl}/og-image/${urlSlug}`;
+      ogImageType = 'image/jpeg';
     }
 
     const html = `<!DOCTYPE html>
@@ -1229,12 +1241,12 @@ exports.getCardSharePreview = async (req, res) => {
   <meta charset="utf-8" />
   <title>${escapeXml(ogTitle)}</title>
   <meta property="og:site_name" content="Revayah One" />
-  <meta property="og:type" content="profile" />
+  <meta property="og:type" content="website" />
   <meta property="og:title" content="${escapeXml(ogTitle)}" />
   <meta property="og:description" content="${escapeXml(ogDesc)}" />
   <meta property="og:image" content="${escapeXml(ogImage)}" />
   <meta property="og:image:secure_url" content="${escapeXml(ogImage)}" />
-  <meta property="og:image:type" content="image/png" />
+  <meta property="og:image:type" content="${ogImageType}" />
   <meta property="og:image:width" content="600" />
   <meta property="og:image:height" content="600" />
   <meta property="og:url" content="${shareUrl}" />
@@ -1290,9 +1302,9 @@ exports.proxyImage = async (req, res) => {
 };
 
 /**
- * Serves or redirects to the miniature card preview image.
- * If pre-rendered cardPreviewImage in Azure Blob exists, 302 redirects to it.
- * Otherwise falls back to the owner's profilePhoto until cardPreviewImage is generated.
+ * Serves the miniature card preview image.
+ * Streams the image buffer directly with HTTP 200 (NO 302 REDIRECTS) so WhatsApp,
+ * LinkedIn, and iMessage crawlers display the image preview thumbnail reliably.
  */
 exports.getCardOgImage = async (req, res) => {
   try {
@@ -1316,20 +1328,73 @@ exports.getCardOgImage = async (req, res) => {
       }
     }
 
-    // 1. If pre-rendered full card thumbnail in Azure Blob exists, redirect to it
-    if (card && card.cardPreviewImage && !card.cardPreviewImage.startsWith('data:') && card.cardPreviewImage.startsWith('http')) {
-      return res.redirect(302, card.cardPreviewImage);
+    const sendLocalFallback = () => {
+      const defaultPreview = path.join(__dirname, '../assets/default-card-preview.jpg');
+      if (fs.existsSync(defaultPreview)) {
+        res.setHeader('Content-Type', 'image/jpeg');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        return res.status(200).sendFile(defaultPreview);
+      }
+      const logoFallback = path.join(__dirname, '../assets/revayah-logo-small.png');
+      if (fs.existsSync(logoFallback)) {
+        res.setHeader('Content-Type', 'image/png');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        return res.status(200).sendFile(logoFallback);
+      }
+      return res.status(404).send('Image not found');
+    };
+
+    const streamRemoteImage = async (imgUrl) => {
+      try {
+        const response = await fetch(imgUrl);
+        if (response.ok) {
+          const contentType = response.headers.get('content-type') || (imgUrl.endsWith('.png') ? 'image/png' : 'image/jpeg');
+          const buffer = Buffer.from(await response.arrayBuffer());
+          res.setHeader('Content-Type', contentType);
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.setHeader('Cache-Control', 'public, max-age=86400');
+          return res.status(200).send(buffer);
+        }
+      } catch (err) {
+        console.warn('⚠️ Error streaming remote OG image:', imgUrl, err.message);
+      }
+      return sendLocalFallback();
+    };
+
+    // 1. If pre-rendered full card thumbnail in Azure Blob exists, stream directly (HTTP 200)
+    if (card && card.cardPreviewImage && typeof card.cardPreviewImage === 'string' && card.cardPreviewImage.startsWith('http') && !card.cardPreviewImage.startsWith('data:')) {
+      return await streamRemoteImage(card.cardPreviewImage);
     }
 
-    // 2. Fallback: profile photo of the card owner
-    if (card && card.profilePhoto && !card.profilePhoto.startsWith('data:') && card.profilePhoto.startsWith('http')) {
-      return res.redirect(302, card.profilePhoto);
+    // 2. Profile photo of the card owner, stream directly (HTTP 200)
+    if (card && card.profilePhoto && typeof card.profilePhoto === 'string') {
+      if (card.profilePhoto.startsWith('http') && !card.profilePhoto.startsWith('data:')) {
+        return await streamRemoteImage(card.profilePhoto);
+      }
+      if (card.profilePhoto.startsWith('/uploads/') || card.profilePhoto.startsWith('uploads/')) {
+        const localPath = path.join(__dirname, '..', card.profilePhoto.replace(/^\//, ''));
+        if (fs.existsSync(localPath)) {
+          const ext = path.extname(localPath).toLowerCase();
+          res.setHeader('Content-Type', ext === '.png' ? 'image/png' : 'image/jpeg');
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.setHeader('Cache-Control', 'public, max-age=86400');
+          return res.status(200).sendFile(localPath);
+        }
+      }
     }
 
-    return res.redirect(302, 'https://www.revayah.one/revayah-logo-small.png');
+    // 3. Fallback: stream executive default card snapshot preview (HTTP 200)
+    return sendLocalFallback();
   } catch (error) {
     console.error('Error in getCardOgImage:', error);
-    return res.redirect(302, 'https://www.revayah.one/revayah-logo-small.png');
+    const defaultPreview = path.join(__dirname, '../assets/default-card-preview.jpg');
+    if (fs.existsSync(defaultPreview)) {
+      res.setHeader('Content-Type', 'image/jpeg');
+      return res.status(200).sendFile(defaultPreview);
+    }
+    return res.status(500).send('Image error');
   }
 };
 
@@ -1363,12 +1428,19 @@ exports.uploadCardPreviewImage = async (req, res) => {
 
     let imageUrl = cardPreviewImage;
     if (isBase64DataUrl(cardPreviewImage)) {
-      imageUrl = await uploadBase64ToAzure(cardPreviewImage, 'cardPreviewImage');
+      imageUrl = await uploadBase64ToAzure(cardPreviewImage, 'miniCardSnapshot');
     }
 
     let query = { _id: cardId };
     if (!/^[0-9a-fA-F]{24}$/.test(cardId)) {
-      query = { $or: [{ urlSlug: cardId }, { customUrl: cardId }] };
+      query = {
+        $or: [
+          { urlSlug: cardId },
+          { urlSlug: new RegExp(`^${cardId}$`, 'i') },
+          { customUrl: cardId },
+          { customUrl: new RegExp(`^${cardId}$`, 'i') }
+        ]
+      };
     }
 
     const updated = await cardModel.findOneAndUpdate(
