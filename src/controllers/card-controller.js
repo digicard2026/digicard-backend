@@ -1176,14 +1176,17 @@ exports.getCardSharePreview = async (req, res) => {
     }
 
     const host = req.get('x-forwarded-host') || req.get('host') || 'www.revayah.one';
-    const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+    const isLocalhost = host.includes('localhost') || host.includes('127.0.0.1');
+    // Social media crawlers (WhatsApp, LinkedIn, Twitter) require HTTPS for og:image and og:url.
+    // If not purely local, always use HTTPS so crawlers don't reject mixed HTTP/HTTPS content.
+    const proto = isLocalhost ? (req.headers['x-forwarded-proto'] || req.protocol || 'http') : 'https';
     const dynamicOrigin = `${proto}://${host}`;
     const isLive = host.includes('revayah.one');
 
     const frontendUrl = isLive ? (process.env.FRONTEND_URL || 'https://www.revayah.one') : (process.env.FRONTEND_URL && !process.env.FRONTEND_URL.includes('revayah.one') ? process.env.FRONTEND_URL : 'http://localhost:5173');
     const backendUrl = isLive ? (process.env.BACKEND_URL || 'https://api.revayah.one') : dynamicOrigin;
     const targetUrl = urlSlug ? `${frontendUrl}/preview/${urlSlug}` : frontendUrl;
-    const shareUrl = isLive ? `${frontendUrl}/preview/${urlSlug}` : `${dynamicOrigin}/p/${urlSlug}`;
+    const shareUrl = isLive ? `${frontendUrl}/preview/${urlSlug}` : `${dynamicOrigin}/preview/${urlSlug}`;
 
     if (!card) {
       const fallbackHtml = `<!DOCTYPE html>
@@ -1223,8 +1226,12 @@ exports.getCardSharePreview = async (req, res) => {
     } else if (card.profilePhoto && typeof card.profilePhoto === 'string' && card.profilePhoto.startsWith('http') && !card.profilePhoto.startsWith('data:')) {
       ogImage = card.profilePhoto;
       ogImageType = card.profilePhoto.endsWith('.png') ? 'image/png' : 'image/jpeg';
+    } else if (card.profilePhoto && typeof card.profilePhoto === 'string' && (card.profilePhoto.startsWith('/uploads/') || card.profilePhoto.startsWith('uploads/'))) {
+      const cleanPath = card.profilePhoto.startsWith('/') ? card.profilePhoto : `/${card.profilePhoto}`;
+      ogImage = `${backendUrl}${cleanPath}`;
+      ogImageType = cleanPath.endsWith('.png') ? 'image/png' : 'image/jpeg';
     } else {
-      ogImage = `${backendUrl}/api/v1/card-routes/og-image/${urlSlug}`;
+      ogImage = `${backendUrl}/og-image/${urlSlug}`;
       ogImageType = 'image/jpeg';
     }
 
@@ -1362,8 +1369,20 @@ exports.getCardOgImage = async (req, res) => {
     }
 
     // 2. Profile photo of the card owner, stream directly (HTTP 200)
-    if (card && card.profilePhoto && typeof card.profilePhoto === 'string' && card.profilePhoto.startsWith('http') && !card.profilePhoto.startsWith('data:')) {
-      return await streamRemoteImage(card.profilePhoto);
+    if (card && card.profilePhoto && typeof card.profilePhoto === 'string') {
+      if (card.profilePhoto.startsWith('http') && !card.profilePhoto.startsWith('data:')) {
+        return await streamRemoteImage(card.profilePhoto);
+      }
+      if (card.profilePhoto.startsWith('/uploads/') || card.profilePhoto.startsWith('uploads/')) {
+        const localPath = path.join(__dirname, '..', card.profilePhoto.replace(/^\//, ''));
+        if (fs.existsSync(localPath)) {
+          const ext = path.extname(localPath).toLowerCase();
+          res.setHeader('Content-Type', ext === '.png' ? 'image/png' : 'image/jpeg');
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.setHeader('Cache-Control', 'public, max-age=86400');
+          return res.status(200).sendFile(localPath);
+        }
+      }
     }
 
     // 3. Fallback: stream executive default card snapshot preview (HTTP 200)
