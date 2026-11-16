@@ -354,6 +354,7 @@ const cardSchema = new mongoose.Schema({
     ],
     default: 'Personal'
   },
+  isTrialCard: { type: Boolean, default: false },
   
   // Add-ons
   addons: {

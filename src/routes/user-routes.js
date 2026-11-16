@@ -7,6 +7,7 @@ const userController = require("../controllers/user-controller");
 router.post("/sign-up", userController.signUp);  
 router.post("/auto-create-for-card", userController.autoCreateUserForCard);
 router.post("/verify-user", userController.verifyUser);         
+router.get("/profile/:id", userController.getUserById);
 router.get("/:id", userController.getUserById);             
 
 // -------------------- EMAIL VERIFICATION --------------------

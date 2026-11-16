@@ -1,6 +1,18 @@
 const multer = require("multer");
 const { BlobServiceClient } = require("@azure/storage-blob");
 const path = require("path");
+const AzureBlobUtil = require("./azureBlobUtil");
+let azureUtilInstance = null;
+function getAzureUtil() {
+  if (!azureUtilInstance) {
+    try {
+      azureUtilInstance = new AzureBlobUtil();
+    } catch (e) {
+      console.warn("Could not init AzureBlobUtil in multer-util:", e.message);
+    }
+  }
+  return azureUtilInstance;
+}
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const CONNECTION_STRING = process.env.AZURE_STORAGE_CONNECTION_STRING;

@@ -1,48 +1,39 @@
 const mongoose = require("mongoose");
-const UserSubscription = require("../models/user-subscription.model");
+const { checkUserSubscriptionActive } = require("../services/subscription-service");
 
 const checkSubscription = async (req, res, next) => {
   try {
-    // userId available because of "auth" middleware
-    const userId = req.user.id;
+    // userId or email available from "auth" middleware or body/query
+    const userId = req.user?.id || req.user?._id || req.body?.createdBy || req.body?.userId;
+    const userEmail = req.user?.email || req.body?.email;
 
-    console.log("USER ID FROM TOKEN:", userId);
+    const userIdentifier = userId || userEmail;
 
-    if (!userId) {
+    if (!userIdentifier) {
       return res.status(400).json({
-        message: "User ID not found in token."
+        allow: false,
+        popup: true,
+        message: "User authentication or identification required to verify subscription."
       });
     }
 
-    // Find user's latest subscription
-    const latestSub = await UserSubscription.findOne({ userId })
-      .sort({ createdAt: -1 });
+    const subCheck = await checkUserSubscriptionActive(userIdentifier);
 
-    // If no subscription found → new user → allow 7-day trial
-    if (!latestSub) {
-      return res.status(200).json({
-        allow: true,
-        popup: false,
-        message: "Free trial active for new user."
-      });
-    }
-
-    const now = new Date();
-
-    // Check expiry
-    if (now > latestSub.endDate) {
+    if (!subCheck.active) {
       return res.status(403).json({
         allow: false,
         popup: true,
-        message: "Your free trial has ended. Please purchase a subscription."
+        isExpired: true,
+        message: subCheck.message || "Your 7-day free trial or subscription has ended. Please purchase a subscription to continue."
       });
     }
 
-    // Subscription valid → continue
+    req.subscription = subCheck.subscription;
     next();
   } catch (err) {
-    console.log("checkSubscription error:", err);
+    console.error("checkSubscription error:", err);
     res.status(500).json({
+      allow: false,
       message: "Subscription verification failed."
     });
   }

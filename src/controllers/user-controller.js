@@ -330,10 +330,20 @@ exports.verifyUser = async (req, res) => {
       sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
     });
 
+    res.cookie("user_id", user._id.toString(), {
+      httpOnly: false,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+    });
+
     res.status(200).json({
       success: true,
       token,
       user_id: user._id.toString(),
+      name: user.name || "",
+      firstName: user.firstName || "",
+      lastName: user.lastName || "",
+      email: user.email,
       role: user.role || null,
       registrationComplete: user.registrationComplete || false,
       message: "Login successful",
@@ -422,7 +432,45 @@ exports.getUserById = async (req, res) => {
     const user = await findUserById(req.params.id);
     if (!user) return res.status(404).json({ error: "User not found." });
 
-    res.status(200).json({ _id: user._id, email: user.email, role: user.role });
+    let firstName = user.firstName || "";
+    let lastName = user.lastName || "";
+    let name = user.name || "";
+
+    if (!firstName && name) {
+      const parts = name.trim().split(/\s+/);
+      firstName = parts[0] || "";
+      lastName = parts.slice(1).join(" ") || "";
+    }
+
+    // If User model doesn't have names, check if the user has created a card
+    if (!firstName) {
+      try {
+        const Card = require("../models/card.model");
+        const latestCard = await Card.findOne({ createdBy: user._id }).sort({ updatedAt: -1, createdAt: -1 });
+        if (latestCard) {
+          firstName = latestCard.firstName || "";
+          lastName = latestCard.lastName || "";
+          if (!name) {
+            name = `${firstName} ${lastName}`.trim();
+          }
+        }
+      } catch (cardErr) {
+        console.warn("Could not fetch card for user initials:", cardErr.message);
+      }
+    }
+
+    res.status(200).json({
+      _id: user._id,
+      name: name || (firstName ? `${firstName} ${lastName}`.trim() : "") || "",
+      firstName: firstName || "",
+      lastName: lastName || "",
+      first_name: firstName || name || "",
+      last_name: lastName || "",
+      email: user.email,
+      role: user.role,
+      phoneNumber: user.phoneNumber || "",
+      profile_url: user.profile_url || ""
+    });
   } catch (err) {
     console.error("Get user by ID error:", err);
     res.status(500).json({ error: "Internal Server Error" });

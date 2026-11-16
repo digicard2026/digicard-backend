@@ -19,6 +19,9 @@ const cardUpload = upload.fields([
     { name: 'videos', maxCount: 10 }
 ]);
 
+// Standalone Direct Azure File Upload
+router.post('/upload-file', upload.any(), cardController.uploadDirectFile);
+
 // CREATE card with Azure Blob Storage file upload (POST)
 router.post('/create-card', cardUpload, cardController.createCard);
 

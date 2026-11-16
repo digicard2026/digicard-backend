@@ -43,15 +43,39 @@ exports.getUserSubscriptionStatus = async (userId) => {
     if (user) queryUserId = user._id;
   }
 
-  const subscription = await UserSubscription.findOne({ userId: queryUserId })
+  let subscription = await UserSubscription.findOne({ userId: queryUserId })
     .sort({ createdAt: -1 })
     .populate("planId");
 
   if (!subscription) {
-    return {
-      hasSubscription: false,
-      message: "No subscription found",
-    };
+    const userDoc = await User.findById(queryUserId);
+    if (userDoc) {
+      // Calculate 7-day trial from user's registration date
+      const regDate = userDoc.createdAt ? new Date(userDoc.createdAt) : new Date();
+      const trialEndDate = new Date(regDate.getTime() + 7 * 24 * 60 * 60 * 1000);
+      const isPastTrial = new Date() > trialEndDate;
+
+      subscription = await UserSubscription.create({
+        userId: userDoc._id,
+        planName: "Personal",
+        planCategory: "personal",
+        duration: "monthly",
+        startDate: regDate,
+        endDate: trialEndDate,
+        paymentStatus: "free_trial",
+        status: isPastTrial ? "expired" : "active",
+        amountPaid: 0,
+        purchasedAddons: [],
+        unlockedFields: []
+      });
+    } else {
+      return {
+        hasSubscription: false,
+        status: "expired",
+        daysLeft: 0,
+        message: "No subscription found",
+      };
+    }
   }
 
   const now = new Date();
@@ -77,6 +101,11 @@ exports.getUserSubscriptionStatus = async (userId) => {
     (subscription.planId && subscription.planId.price) ||
     0;
 
+  const isTrial = Boolean(
+    subscription.paymentStatus === "free_trial" ||
+    (!subscription.amountPaid && !subscription.paymentId)
+  );
+
   return {
     hasSubscription: true,
     planId: subscription.planId?._id || subscription.planId,
@@ -92,6 +121,9 @@ exports.getUserSubscriptionStatus = async (userId) => {
     status: isExpired ? "expired" : "active",
     amountPaid: subscription.amountPaid,
     paymentId: subscription.paymentId || null,
+    paymentStatus: subscription.paymentStatus || (isTrial ? "free_trial" : "success"),
+    isTrial: isTrial,
+    trialDaysLeft: isTrial ? (isExpired ? 0 : daysLeft) : 0,
     purchasedAddons: subscription.purchasedAddons || [],
     unlockedFields: subscription.unlockedFields || [],
     plan: subscription.planId || null,
@@ -340,5 +372,46 @@ exports.updateUserSubscriptionPlan = async ({ userId, email, planName, planCateg
       success: false,
       message: error.message
     };
+  }
+};
+
+// Check if user's subscription or 7-day free trial is currently active
+exports.checkUserSubscriptionActive = async (userIdOrEmail) => {
+  try {
+    if (!userIdOrEmail) {
+      return { active: false, reason: "no_user", message: "User identifier not provided" };
+    }
+
+    let queryUserId = userIdOrEmail;
+    if (!mongoose.Types.ObjectId.isValid(userIdOrEmail)) {
+      const user = await User.findOne({ email: String(userIdOrEmail).trim().toLowerCase() });
+      if (user) {
+        queryUserId = user._id;
+      } else {
+        return { active: false, reason: "user_not_found", message: "User not found" };
+      }
+    }
+
+    const statusObj = await exports.getUserSubscriptionStatus(queryUserId);
+    if (!statusObj.hasSubscription) {
+      return { active: false, reason: "no_subscription", message: "No subscription record found" };
+    }
+
+    if (statusObj.status === "expired" || statusObj.daysLeft <= 0) {
+      return {
+        active: false,
+        reason: "expired",
+        message: "Your 7-day free trial or subscription has expired. Please purchase a plan to continue.",
+        subscription: statusObj
+      };
+    }
+
+    return {
+      active: true,
+      subscription: statusObj
+    };
+  } catch (err) {
+    console.error("Error checking active subscription:", err);
+    return { active: false, reason: "error", message: err.message };
   }
 };
