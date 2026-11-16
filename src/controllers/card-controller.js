@@ -10,6 +10,66 @@ const User = require("../models/user.model");
 const cardModel = require("../models/card.model");
 const { isSocialCrawler } = require("../utils/crawler-detector");
 const { uploadBase64ToAzure, isBase64DataUrl } = require("../utils/azure-base64-uploader");
+const { checkUserSubscriptionActive } = require("../services/subscription-service");
+const AzureBlobUtil = require("../utils/azureBlobUtil");
+let azureUtilInstance = null;
+function getAzureBlobUtil() {
+    if (!azureUtilInstance) {
+        try {
+            azureUtilInstance = new AzureBlobUtil();
+        } catch (e) {
+            console.warn("Could not init AzureBlobUtil in card-controller:", e.message);
+        }
+    }
+    return azureUtilInstance;
+}
+
+const upgradeCardAzureUrls = (card) => {
+    if (!card) return card;
+    const azureUtil = getAzureBlobUtil();
+    if (!azureUtil || typeof azureUtil.getSasUrl !== 'function') return card;
+
+    const fixUrl = (u) => {
+        if (!u || typeof u !== 'string') return u;
+        if (u.includes('blob.core.windows.net') && !u.includes('sig=')) {
+            return azureUtil.getSasUrl(null, u);
+        }
+        return u;
+    };
+
+    const c = typeof card.toObject === 'function' ? card.toObject() : (Array.isArray(card) ? card : { ...card });
+
+    if (c.profilePhoto) c.profilePhoto = fixUrl(c.profilePhoto);
+    if (c.companyLogo) c.companyLogo = fixUrl(c.companyLogo);
+    if (c.cardPreviewImage) c.cardPreviewImage = fixUrl(c.cardPreviewImage);
+    if (c.catalogPDF && typeof c.catalogPDF === 'string') c.catalogPDF = fixUrl(c.catalogPDF);
+    if (c.catalogPDF && c.catalogPDF.url) c.catalogPDF.url = fixUrl(c.catalogPDF.url);
+
+    if (Array.isArray(c.gallery)) {
+        c.gallery = c.gallery.map((item, idx) => {
+            if (!item) return item;
+            if (typeof item === 'string') return { type: 'image', url: fixUrl(item), title: `Photo ${idx + 1}`, category: 'Portfolio', uploadType: 'upload' };
+            return {
+                ...item,
+                url: fixUrl(item.url),
+                ...(item.thumbnail ? { thumbnail: fixUrl(item.thumbnail) } : {})
+            };
+        });
+    }
+
+    if (Array.isArray(c.services)) {
+        c.services = c.services.map(s => (s && s.image ? { ...s, image: fixUrl(s.image) } : s));
+    }
+    if (Array.isArray(c.products)) {
+        c.products = c.products.map(p => (p && p.image ? { ...p, image: fixUrl(p.image) } : p));
+    }
+    if (Array.isArray(c.downloads)) {
+        c.downloads = c.downloads.map(d => (d && d.fileUrl ? { ...d, fileUrl: fixUrl(d.fileUrl) } : d));
+    }
+
+    return c;
+};
+
 
 // Helper to escape XML characters for SVG & OpenGraph HTML
 const escapeXml = (str) => {
@@ -92,11 +152,9 @@ const validateAndSanitizeEntitlements = async (cardDetails, userIdentifier = nul
         const effectivePlanName = normalizePlanKey(rawPlanName);
         cardDetails.cardType = effectivePlanName;
 
-        // Fallback to cardFieldsConfig if allowedFields not populated in DB
-        if (allowedFieldsSet.size === 0) {
-            const config = cardFieldsConfig[effectivePlanName] || cardFieldsConfig.Personal;
-            (config.allowed || []).forEach(f => allowedFieldsSet.add(f));
-        }
+        // Always ensure base plan fields from cardFieldsConfig are included
+        const config = cardFieldsConfig[effectivePlanName] || cardFieldsConfig.Personal;
+        (config.allowed || []).forEach(f => allowedFieldsSet.add(f));
 
         // Metadata & system fields always allowed
         [
@@ -145,6 +203,27 @@ const validateAndSanitizeEntitlements = async (cardDetails, userIdentifier = nul
             subscription.unlockedFields.forEach(f => allowedFieldsSet.add(f));
         }
 
+        // Never strip valid profileVideo, productVideo, or gallery if provided or preserved
+        if (cardDetails.profileVideo && (typeof cardDetails.profileVideo === 'string' || cardDetails.profileVideo.url)) {
+            allowedFieldsSet.add('profileVideo');
+        }
+        if (cardDetails.productVideo && (typeof cardDetails.productVideo === 'string' || cardDetails.productVideo.url)) {
+            allowedFieldsSet.add('productVideo');
+        }
+        if (Array.isArray(cardDetails.gallery) && cardDetails.gallery.length > 0) {
+            // Filter out empty items or corrupted 'SAVED' placeholders
+            cardDetails.gallery = cardDetails.gallery.filter(item => {
+                if (!item) return false;
+                const u = typeof item === 'string' ? item : item.url;
+                if (!u || typeof u !== 'string') return false;
+                const trimmed = u.trim();
+                return trimmed !== '' && trimmed !== 'SAVED' && trimmed !== 'null' && trimmed !== 'undefined';
+            });
+            if (cardDetails.gallery.length > 0) {
+                allowedFieldsSet.add('gallery');
+            }
+        }
+
         // 5. Sanitize submitted fields against allowedFieldsSet
         const allPotentialFields = [
             'profilePhoto', 'companyLogo', 'logoSize', 'firstName', 'lastName', 'prefix', 'suffix',
@@ -159,7 +238,8 @@ const validateAndSanitizeEntitlements = async (cardDetails, userIdentifier = nul
 
         allPotentialFields.forEach(field => {
             if (cardDetails[field] !== undefined && !allowedFieldsSet.has(field)) {
-                delete cardDetails[field];
+                // If field is explicitly cleared or disallowed on this plan, set to null so it doesn't persist
+                cardDetails[field] = null;
             }
         });
 
@@ -197,6 +277,23 @@ exports.createCard = async (req, res) => {
         // Set default cardType if not provided
         if (!cardDetails.cardType) {
             cardDetails.cardType = 'Personal';
+        }
+
+        // Verify owner's 7-day free trial or active subscription status
+        const ownerIdentifier = cardDetails.createdBy || cardDetails.email || req.user?.id || req.user?.email;
+        if (ownerIdentifier) {
+            const subCheck = await checkUserSubscriptionActive(ownerIdentifier);
+            if (!subCheck.active) {
+                return res.status(403).json({
+                    success: false,
+                    isExpired: true,
+                    error: subCheck.message || "Your 7-day free trial or subscription has expired. Please purchase a subscription to continue creating cards."
+                });
+            }
+            cardDetails.isTrialCard = Boolean(subCheck.subscription?.isTrial);
+            if (!cardDetails.isTrialCard && subCheck.subscription?.planType && (!cardDetails.cardType || cardDetails.cardType === 'Personal')) {
+                cardDetails.cardType = subCheck.subscription.planType;
+            }
         }
 
         // Helper function to sanitize filename
@@ -399,6 +496,14 @@ exports.updateCard = async (req, res) => {
             });
         }
 
+        // Normalize empty string or string 'null' removals
+        if (cardDetails.profilePhoto === '' || cardDetails.profilePhoto === 'null') {
+            cardDetails.profilePhoto = null;
+        }
+        if (cardDetails.companyLogo === '' || cardDetails.companyLogo === 'null') {
+            cardDetails.companyLogo = null;
+        }
+
         // Get existing card
         const existingCard = await cardService.getCardById(cardId);
         if (!existingCard) {
@@ -406,6 +511,25 @@ exports.updateCard = async (req, res) => {
                 success: false,
                 error: "Card not found"
             });
+        }
+
+        // Verify owner's 7-day free trial or active subscription status
+        const ownerIdentifier = existingCard.createdBy || existingCard.email || cardDetails.createdBy || cardDetails.email || req.user?.id || req.user?.email;
+        if (ownerIdentifier) {
+            const subCheck = await checkUserSubscriptionActive(ownerIdentifier);
+            if (!subCheck.active) {
+                return res.status(403).json({
+                    success: false,
+                    isExpired: true,
+                    error: subCheck.message || "Your 7-day free trial or subscription has expired. Please purchase a subscription to continue updating cards."
+                });
+            }
+            // Preserve the card's original creation status: cards created during trial remain trial cards permanently!
+            if (existingCard.isTrialCard !== undefined) {
+                cardDetails.isTrialCard = existingCard.isTrialCard;
+            } else {
+                cardDetails.isTrialCard = Boolean(subCheck.subscription?.isTrial);
+            }
         }
 
         // Handle Azure Blob Storage file uploads if present
@@ -485,6 +609,29 @@ exports.updateCard = async (req, res) => {
             }
         }
 
+        // Preserve cardType if higher tier exists on existing card
+        if (existingCard.cardType && (!cardDetails.cardType || cardDetails.cardType === 'Personal')) {
+            cardDetails.cardType = existingCard.cardType;
+        }
+
+        // Preserve profileVideo and productVideo if not explicitly cleared by user
+        if (cardDetails.profileVideo === undefined && existingCard.profileVideo) {
+            cardDetails.profileVideo = existingCard.profileVideo;
+        } else if (cardDetails.profileVideo && typeof cardDetails.profileVideo === 'object' && !cardDetails.profileVideo.url && existingCard.profileVideo) {
+            cardDetails.profileVideo = existingCard.profileVideo;
+        }
+
+        if (cardDetails.productVideo === undefined && existingCard.productVideo) {
+            cardDetails.productVideo = existingCard.productVideo;
+        } else if (cardDetails.productVideo && typeof cardDetails.productVideo === 'object' && !cardDetails.productVideo.url && existingCard.productVideo) {
+            cardDetails.productVideo = existingCard.productVideo;
+        }
+
+        // Preserve gallery collection: never wipe existing gallery on edit unless explicitly provided with new valid items
+        if ((cardDetails.gallery === undefined || !Array.isArray(cardDetails.gallery) || cardDetails.gallery.length === 0) && existingCard.gallery && existingCard.gallery.length > 0) {
+            cardDetails.gallery = existingCard.gallery;
+        }
+
         // Enforce plan-level field restrictions & server-side entitlement checks
         await validateAndSanitizeEntitlements(cardDetails, req.user?.id || cardDetails.userId || cardDetails.email);
 
@@ -497,7 +644,7 @@ exports.updateCard = async (req, res) => {
         res.status(200).json({
             success: true,
             message: "Card updated successfully",
-            card: updatedCard
+            card: upgradeCardAzureUrls(updatedCard)
         });
     } catch (error) {
         console.error("Update Card error:", error);
@@ -662,6 +809,19 @@ exports.getCardById = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Card not found' });
         }
 
+        // Check owner subscription / 7-day trial status
+        const ownerIdentifier = card.createdBy || card.email;
+        if (ownerIdentifier) {
+            const subCheck = await checkUserSubscriptionActive(ownerIdentifier);
+            if (!subCheck.active) {
+                return res.status(403).json({
+                    success: false,
+                    isExpired: true,
+                    message: "This digital card is temporarily unavailable because the owner's free trial or subscription has expired."
+                });
+            }
+        }
+
         res.status(200).json({ success: true, message: "Card fetched successfully", card });
     } catch (error) {
         if (error.message.includes('Invalid card ID format')) {
@@ -752,6 +912,19 @@ exports.getCardByUrlSlug = async (req, res) => {
         // Check if card is public
         if (!card.isPublic) {
             return res.status(403).json({ success: false, message: 'This card is not publicly accessible' });
+        }
+
+        // Check owner subscription / 7-day trial status
+        const ownerIdentifier = card.createdBy || card.email;
+        if (ownerIdentifier) {
+            const subCheck = await checkUserSubscriptionActive(ownerIdentifier);
+            if (!subCheck.active) {
+                return res.status(403).json({
+                    success: false,
+                    isExpired: true,
+                    message: "This digital card is temporarily unavailable because the owner's free trial or subscription has expired."
+                });
+            }
         }
 
         await cardService.incrementViewCount(card._id);
@@ -1461,5 +1634,52 @@ exports.uploadCardPreviewImage = async (req, res) => {
   } catch (error) {
     console.error('Error in uploadCardPreviewImage:', error);
     return res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// Standalone direct file upload to Azure Blob Storage (supports multipart files and base64 payloads)
+exports.uploadDirectFile = async (req, res) => {
+  try {
+    // 1. If uploaded via multipart form (multer with Azure Blob Storage)
+    if (req.files && req.files.length > 0) {
+      const uploadedFiles = req.files.map(file => ({
+        url: file.location || file.url,
+        name: file.originalname,
+        filename: file.filename,
+        mimetype: file.mimetype,
+        size: file.size
+      }));
+
+      return res.status(200).json({
+        success: true,
+        message: 'File(s) uploaded to Azure Blob Storage successfully',
+        url: uploadedFiles[0].url,
+        file: uploadedFiles[0],
+        files: uploadedFiles
+      });
+    }
+
+    // 2. If uploaded via base64 JSON payload
+    const { base64, prefix = 'gallery', originalName = '' } = req.body || {};
+    if (base64 && isBase64DataUrl(base64)) {
+      const url = await uploadBase64ToAzure(base64, prefix, originalName);
+      return res.status(200).json({
+        success: true,
+        message: 'Base64 image uploaded to Azure Blob Storage successfully',
+        url,
+        file: { url, name: originalName }
+      });
+    }
+
+    return res.status(400).json({
+      success: false,
+      message: 'No file or valid base64 payload provided'
+    });
+  } catch (error) {
+    console.error('Error in uploadDirectFile:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message
+    });
   }
 };

@@ -605,6 +605,64 @@ exports.updateCard = async (cardId, updatedCard) => {
         lastSaved: new Date()
     };
 
+    // Explicitly allow clearing profilePhoto, companyLogo, or cardPreviewImage when updated
+    if (updatedCard.profilePhoto === null || updatedCard.profilePhoto === '') {
+        mergedData.profilePhoto = null;
+    }
+    if (updatedCard.companyLogo === null || updatedCard.companyLogo === '') {
+        mergedData.companyLogo = null;
+    }
+    if (updatedCard.cardPreviewImage === null) {
+        mergedData.cardPreviewImage = null;
+    }
+
+    // Video sanitation helper: clean nested objects or '[object Object]'
+    const sanitizeVideoPayload = (videoField) => {
+        if (!videoField) return null;
+        let vUrl = videoField;
+        while (typeof vUrl === 'object' && vUrl !== null && vUrl.url) {
+            vUrl = vUrl.url;
+        }
+        if (typeof vUrl === 'string') {
+            const trimmed = vUrl.trim();
+            if (!trimmed || trimmed === '[object Object]') return null;
+            return {
+                url: trimmed,
+                thumbnail: (typeof videoField === 'object' && videoField.thumbnail) || '',
+                title: (typeof videoField === 'object' && videoField.title) || '',
+                uploadType: (typeof videoField === 'object' && videoField.uploadType) || 'url'
+            };
+        }
+        return null;
+    };
+
+    const hasValidVideoUrl = (val) => {
+        if (!val) return false;
+        if (typeof val === 'string') return val.trim().length > 0 && val.trim() !== '[object Object]';
+        if (typeof val === 'object') {
+            const url = val.url || val.link || val.src;
+            if (typeof url === 'string') return url.trim().length > 0 && url.trim() !== '[object Object]';
+            if (typeof url === 'object') return hasValidVideoUrl(url);
+        }
+        return false;
+    };
+
+    if (updatedCard.profileVideo === null || (updatedCard.profileVideo !== undefined && !hasValidVideoUrl(updatedCard.profileVideo))) {
+        mergedData.profileVideo = null;
+    } else if (updatedCard.profileVideo) {
+        mergedData.profileVideo = sanitizeVideoPayload(updatedCard.profileVideo);
+    } else if (mergedData.profileVideo) {
+        mergedData.profileVideo = sanitizeVideoPayload(mergedData.profileVideo);
+    }
+
+    if (updatedCard.productVideo === null || (updatedCard.productVideo !== undefined && !hasValidVideoUrl(updatedCard.productVideo))) {
+        mergedData.productVideo = null;
+    } else if (updatedCard.productVideo) {
+        mergedData.productVideo = sanitizeVideoPayload(updatedCard.productVideo);
+    } else if (mergedData.productVideo) {
+        mergedData.productVideo = sanitizeVideoPayload(mergedData.productVideo);
+    }
+
     // Remove any undefined fields
     Object.keys(mergedData).forEach(key => {
         if (mergedData[key] === undefined) {

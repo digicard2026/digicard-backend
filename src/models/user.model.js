@@ -4,6 +4,9 @@ const userSchema = new mongoose.Schema(
   {
     // Basic User Info (Signup)
     name: { type: String },
+    firstName: { type: String },
+    lastName: { type: String },
+    profile_url: { type: String, default: "" },
     email: {
       type: String,
       required: true,

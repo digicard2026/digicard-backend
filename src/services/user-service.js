@@ -37,71 +37,70 @@ exports.createUser = async ({ email, password, selectedPlan, selectedAddons = []
       createdBy: createdBy || null,
     });
 
-    // Task 1.4: Initialize UserSubscription upon registration with selected plan and addons
-    if (selectedPlan) {
-      try {
-        const normalizePlanKey = (raw = "") => {
-          if (!raw) return "Personal";
-          const cleaned = String(raw).replace(/[\s\-_]/g, '').toLowerCase();
-          if (cleaned.includes("miniwebsite") || cleaned.includes("website")) return "MiniWebsite";
-          if (cleaned.includes("team")) return "Team";
-          if (cleaned.includes("corporate")) return "CorporateBusiness";
-          if (cleaned.includes("multiactivit") || cleaned.includes("multi")) return "EntrepreneurialsMulti";
-          if (cleaned.includes("entrepreneur")) return "Entrepreneurials";
-          if (cleaned.includes("professionalpro")) return "ProfessionalPro";
-          if (cleaned.includes("workingprofessional") || cleaned.includes("working")) return "Business";
-          if (cleaned.includes("professional")) return "Professionals";
-          if (cleaned.includes("serviceprovider") || cleaned.includes("businesspremium") || cleaned.includes("premium")) return "BusinessPremium";
-          if (cleaned.includes("business")) return "Business";
-          if (cleaned.includes("personal") || cleaned.includes("individual")) return "Personal";
-          return "Personal";
-        };
+    // Initialize 7-Day Free Trial UserSubscription upon registration for ALL new users
+    try {
+      const planToUse = selectedPlan || "Personal";
+      const normalizePlanKey = (raw = "") => {
+        if (!raw) return "Personal";
+        const cleaned = String(raw).replace(/[\s\-_]/g, '').toLowerCase();
+        if (cleaned.includes("miniwebsite") || cleaned.includes("website")) return "MiniWebsite";
+        if (cleaned.includes("team")) return "Team";
+        if (cleaned.includes("corporate")) return "CorporateBusiness";
+        if (cleaned.includes("multiactivit") || cleaned.includes("multi")) return "EntrepreneurialsMulti";
+        if (cleaned.includes("entrepreneur")) return "Entrepreneurials";
+        if (cleaned.includes("professionalpro")) return "ProfessionalPro";
+        if (cleaned.includes("workingprofessional") || cleaned.includes("working")) return "Business";
+        if (cleaned.includes("professional")) return "Professionals";
+        if (cleaned.includes("serviceprovider") || cleaned.includes("businesspremium") || cleaned.includes("premium")) return "BusinessPremium";
+        if (cleaned.includes("business")) return "Business";
+        if (cleaned.includes("personal") || cleaned.includes("individual")) return "Personal";
+        return "Personal";
+      };
 
-        const canonicalPlan = normalizePlanKey(selectedPlan);
-        const cycle = billingCycle === "yearly" ? "yearly" : "monthly";
-        let plan = await Plan.findOne({
+      const canonicalPlan = normalizePlanKey(planToUse);
+      const cycle = billingCycle === "yearly" ? "yearly" : "monthly";
+      let plan = await Plan.findOne({
+        $or: [
+          { name: new RegExp(`^${canonicalPlan}$`, "i") },
+          { displayName: new RegExp(`^${planToUse}$`, "i") }
+        ],
+        duration: cycle
+      });
+
+      if (!plan) {
+        plan = await Plan.findOne({
           $or: [
             { name: new RegExp(`^${canonicalPlan}$`, "i") },
-            { displayName: new RegExp(`^${selectedPlan}$`, "i") }
-          ],
-          duration: cycle
+            { displayName: new RegExp(`^${planToUse}$`, "i") }
+          ]
         });
-
-        if (!plan) {
-          plan = await Plan.findOne({
-            $or: [
-              { name: new RegExp(`^${canonicalPlan}$`, "i") },
-              { displayName: new RegExp(`^${selectedPlan}$`, "i") }
-            ]
-          });
-        }
-
-        const startDate = new Date();
-        const endDate = new Date(startDate.getTime() + 7 * 24 * 60 * 60 * 1000); // 7-day free trial
-
-        const sanitizedAddons = Array.isArray(selectedAddons)
-          ? selectedAddons.map(a => String(a).toLowerCase().trim())
-          : [];
-
-        await UserSubscription.create({
-          userId: user._id,
-          planId: plan ? plan._id : null,
-          planName: plan ? plan.name : selectedPlan,
-          planCategory: plan ? plan.category : selectedPlan.toLowerCase(),
-          duration: cycle,
-          startDate,
-          endDate,
-          paymentStatus: "free_trial",
-          status: "active",
-          amountPaid: 0,
-          purchasedAddons: sanitizedAddons,
-          unlockedFields: []
-        });
-
-        console.log(`UserSubscription trial initialized for user ${user.email} (${selectedPlan})`);
-      } catch (subErr) {
-        console.error("Failed to initialize UserSubscription upon registration:", subErr);
       }
+
+      const startDate = new Date();
+      const endDate = new Date(startDate.getTime() + 7 * 24 * 60 * 60 * 1000); // 7-day free trial
+
+      const sanitizedAddons = Array.isArray(selectedAddons)
+        ? selectedAddons.map(a => String(a).toLowerCase().trim())
+        : [];
+
+      await UserSubscription.create({
+        userId: user._id,
+        planId: plan ? plan._id : null,
+        planName: plan ? plan.name : planToUse,
+        planCategory: plan ? plan.category : planToUse.toLowerCase(),
+        duration: cycle,
+        startDate,
+        endDate,
+        paymentStatus: "free_trial",
+        status: "active",
+        amountPaid: 0,
+        purchasedAddons: sanitizedAddons,
+        unlockedFields: []
+      });
+
+      console.log(`UserSubscription 7-day trial initialized for user ${user.email} (${planToUse}) - Ends: ${endDate.toISOString()}`);
+    } catch (subErr) {
+      console.error("Failed to initialize UserSubscription upon registration:", subErr);
     }
 
     return user;

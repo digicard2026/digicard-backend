@@ -13,6 +13,18 @@ function getAzureBlobUtil() {
   return azureBlobUtilInstance;
 }
 
+
+function ensureSasUrl(url) {
+  if (!url || typeof url !== 'string') return url;
+  if (url.includes('blob.core.windows.net') && !url.includes('sig=')) {
+    const azureUtil = getAzureBlobUtil();
+    if (azureUtil && typeof azureUtil.getSasUrl === 'function') {
+      return azureUtil.getSasUrl(null, url);
+    }
+  }
+  return url;
+}
+
 function isBase64DataUrl(str) {
   return typeof str === 'string' && str.startsWith('data:') && str.includes(';base64,');
 }
