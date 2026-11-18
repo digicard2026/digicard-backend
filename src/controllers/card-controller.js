@@ -279,6 +279,15 @@ exports.createCard = async (req, res) => {
             cardDetails.cardType = 'Personal';
         }
 
+        // Sanitize createdBy to prevent CastError if it's an empty string or invalid ObjectId
+        if (!cardDetails.createdBy || cardDetails.createdBy === "" || !mongoose.Types.ObjectId.isValid(cardDetails.createdBy)) {
+            if (req.user?.id && mongoose.Types.ObjectId.isValid(req.user.id)) {
+                cardDetails.createdBy = req.user.id;
+            } else {
+                delete cardDetails.createdBy;
+            }
+        }
+
         // Verify owner's 7-day free trial or active subscription status
         const ownerIdentifier = cardDetails.createdBy || cardDetails.email || req.user?.id || req.user?.email;
         if (ownerIdentifier) {
@@ -513,6 +522,17 @@ exports.updateCard = async (req, res) => {
             });
         }
 
+        // Sanitize createdBy to prevent CastError if it's an empty string or invalid ObjectId
+        if (!cardDetails.createdBy || cardDetails.createdBy === "" || !mongoose.Types.ObjectId.isValid(cardDetails.createdBy)) {
+            if (existingCard.createdBy) {
+                cardDetails.createdBy = existingCard.createdBy;
+            } else if (req.user?.id && mongoose.Types.ObjectId.isValid(req.user.id)) {
+                cardDetails.createdBy = req.user.id;
+            } else {
+                delete cardDetails.createdBy;
+            }
+        }
+
         // Verify owner's 7-day free trial or active subscription status
         const ownerIdentifier = existingCard.createdBy || existingCard.email || cardDetails.createdBy || cardDetails.email || req.user?.id || req.user?.email;
         if (ownerIdentifier) {
@@ -524,11 +544,13 @@ exports.updateCard = async (req, res) => {
                     error: subCheck.message || "Your 7-day free trial or subscription has expired. Please purchase a subscription to continue updating cards."
                 });
             }
-            // Preserve the card's original creation status: cards created during trial remain trial cards permanently!
-            if (existingCard.isTrialCard !== undefined) {
-                cardDetails.isTrialCard = existingCard.isTrialCard;
+            // If subscription is no longer a trial, remove trial status from card
+            if (!subCheck.subscription?.isTrial) {
+                cardDetails.isTrialCard = false;
             } else {
-                cardDetails.isTrialCard = Boolean(subCheck.subscription?.isTrial);
+                cardDetails.isTrialCard = existingCard.isTrialCard !== undefined
+                    ? existingCard.isTrialCard
+                    : Boolean(subCheck.subscription?.isTrial);
             }
         }
 

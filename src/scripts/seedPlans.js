@@ -17,7 +17,7 @@ const planPricingMap = {
   Business: {
     monthly: 800,
     yearly: 6800,
-    displayName: "DI - Working Professional",
+    displayName: "DI - Working Professionals",
     category: "business",
     categoryGroup: "individual",
     badge: "Most Popular"
@@ -57,7 +57,7 @@ const planPricingMap = {
   EntrepreneurialsMulti: {
     monthly: 2200,
     yearly: 18000,
-    displayName: "DI - Multi-Activities",
+    displayName: "DI - Entrepreneurials - Multi Activities",
     category: "entrepreneurialsmulti",
     categoryGroup: "business",
     badge: "Multi-Venture"
