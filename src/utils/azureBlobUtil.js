@@ -30,6 +30,26 @@ class AzureBlobUtil {
     } catch (parseErr) {
       console.warn("Could not parse StorageSharedKeyCredential for SAS generation:", parseErr.message);
     }
+
+    this.verifiedContainers = new Set();
+  }
+
+  // Ensure container exists before upload
+  async ensureContainer(containerName) {
+    if (!containerName || this.verifiedContainers.has(containerName)) return;
+    try {
+      const containerClient = this.blobServiceClient.getContainerClient(containerName);
+      try {
+        await containerClient.createIfNotExists({ access: 'blob' });
+      } catch (accessErr) {
+        // If public blob access is restricted at account level, create without public access
+        await containerClient.createIfNotExists();
+      }
+      this.verifiedContainers.add(containerName);
+      console.log(`Azure container '${containerName}' verified/ready.`);
+    } catch (err) {
+      console.warn(`Note on Azure container '${containerName}' check:`, err.message);
+    }
   }
 
   /**
@@ -145,6 +165,7 @@ class AzureBlobUtil {
   // Upload file content (Buffer or string) to specified container and blob
   async uploadFile(containerName, blobName, fileContent, contentType = 'application/octet-stream') {
     try {
+      await this.ensureContainer(containerName);
       const containerClient = this.blobServiceClient.getContainerClient(containerName);
       const blockBlobClient = containerClient.getBlockBlobClient(blobName);
 

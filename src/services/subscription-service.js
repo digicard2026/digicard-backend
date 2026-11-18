@@ -3,15 +3,16 @@ const UserSubscription = require("../models/user-subscription.model");
 const SubscriptionPlan = require("../models/subscriptionPlan.model");
 const Plan = require("../models/plan.model");
 const User = require("../models/user.model");
+const Card = require("../models/card.model");
 
 const MASTER_PLANS = {
   personal: { name: 'Personal', displayName: 'DI - Individuals', category: 'personal' },
-  business: { name: 'Business', displayName: 'DI - Working Professional', category: 'business' },
+  business: { name: 'Business', displayName: 'DI - Working Professionals', category: 'business' },
   businesspremium: { name: 'BusinessPremium', displayName: 'DI - Service Providers', category: 'business premium' },
   professionals: { name: 'Professionals', displayName: 'DI - Professionals', category: 'professionals' },
   professionalpro: { name: 'ProfessionalPro', displayName: 'DI - Professional Pro', category: 'professionalpro' },
   entrepreneurials: { name: 'Entrepreneurials', displayName: 'DI - Entrepreneurials', category: 'entrepreneurials' },
-  entrepreneurialsmulti: { name: 'EntrepreneurialsMulti', displayName: 'DI - Multi-Activities', category: 'entrepreneurialsmulti' },
+  entrepreneurialsmulti: { name: 'EntrepreneurialsMulti', displayName: 'DI - Entrepreneurials - Multi Activities', category: 'entrepreneurialsmulti' },
   corporatebusiness: { name: 'CorporateBusiness', displayName: 'DI - Business', category: 'corporatebusiness' },
   team: { name: 'Team', displayName: 'DI - Team', category: 'team' },
   miniwebsite: { name: 'MiniWebsite', displayName: 'DP - Mini Website', category: 'miniwebsite' }
@@ -102,8 +103,9 @@ exports.getUserSubscriptionStatus = async (userId) => {
     0;
 
   const isTrial = Boolean(
-    subscription.paymentStatus === "free_trial" ||
-    (!subscription.amountPaid && !subscription.paymentId)
+    subscription.paymentStatus !== "success" &&
+    subscription.paymentStatus !== "paid" &&
+    (subscription.paymentStatus === "free_trial" || (!subscription.amountPaid && !subscription.paymentId))
   );
 
   return {
@@ -326,6 +328,8 @@ exports.updateUserSubscriptionPlan = async ({ userId, email, planName, planCateg
 
     const existingSub = await UserSubscription.findOne({ userId: queryUserId, status: "active" }).sort({ createdAt: -1 });
 
+    let activeSubscription = null;
+
     if (existingSub) {
       existingSub.planId = plan ? plan._id : existingSub.planId;
       existingSub.planName = master.name;
@@ -334,16 +338,11 @@ exports.updateUserSubscriptionPlan = async ({ userId, email, planName, planCateg
       existingSub.startDate = startDate;
       existingSub.endDate = endDate;
       existingSub.status = "active";
-      if (price) existingSub.amountPaid = Number(price);
+      existingSub.paymentStatus = "success";
+      existingSub.amountPaid = price ? Number(price) : (plan ? plan.price : (existingSub.amountPaid || 500));
       if (Array.isArray(selectedAddons)) existingSub.purchasedAddons = sanitizedAddons;
       await existingSub.save();
-
-      return {
-        success: true,
-        message: "Subscription plan updated successfully",
-        subscription: existingSub,
-        plan: plan || existingSub
-      };
+      activeSubscription = existingSub;
     } else {
       const newSub = await UserSubscription.create({
         userId: queryUserId,
@@ -353,19 +352,44 @@ exports.updateUserSubscriptionPlan = async ({ userId, email, planName, planCateg
         duration: durationCycle,
         startDate,
         endDate,
-        paymentStatus: price ? "success" : "free_trial",
+        paymentStatus: "success",
         status: "active",
-        amountPaid: price ? Number(price) : (plan ? plan.price : 0),
+        amountPaid: price ? Number(price) : (plan ? plan.price : 500),
         purchasedAddons: sanitizedAddons,
       });
-
-      return {
-        success: true,
-        message: "Subscription plan created successfully",
-        subscription: newSub,
-        plan: plan || newSub
-      };
+      activeSubscription = newSub;
     }
+
+    // Update existing user cards in DB to remove trial status and align with upgraded plan
+    try {
+      const userObj = await User.findById(queryUserId);
+      const userEmailStr = (userObj?.email || email || "").trim().toLowerCase();
+
+      const queryFilters = [{ userId: queryUserId }, { createdBy: queryUserId }];
+      if (userEmailStr) {
+        queryFilters.push({ email: userEmailStr });
+        queryFilters.push({ userEmail: userEmailStr });
+      }
+
+      await Card.updateMany(
+        { $or: queryFilters },
+        { 
+          $set: { 
+            isTrialCard: false,
+            cardType: master.name
+          } 
+        }
+      );
+    } catch (cardUpdateErr) {
+      console.warn("Notice: could not update cards on plan switch:", cardUpdateErr);
+    }
+
+    return {
+      success: true,
+      message: "Subscription plan updated successfully",
+      subscription: activeSubscription,
+      plan: plan || activeSubscription
+    };
   } catch (error) {
     console.error("Error in updateUserSubscriptionPlan:", error);
     return {

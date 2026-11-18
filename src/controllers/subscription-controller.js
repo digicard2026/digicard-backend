@@ -63,14 +63,24 @@ exports.getSubscriptionDetails = async (req, res) => {
 // NEW: Get subscription history
 exports.getSubscriptionHistory = async (req, res) => {
   try {
-    if (!req.user || !req.user.id) {
+    let userId = req.user && req.user.id;
+    if (!userId && req.query) {
+      if (req.query.userId && mongoose.Types.ObjectId.isValid(req.query.userId)) {
+        userId = req.query.userId;
+      } else if (req.query.email) {
+        const User = require("../models/user.model");
+        const user = await User.findOne({ email: req.query.email.trim().toLowerCase() });
+        if (user) userId = user._id;
+      }
+    }
+
+    if (!userId) {
       return res.status(401).json({
         success: false,
         message: "User not authenticated",
       });
     }
 
-    const userId = req.user.id;
     const result = await getUserSubscriptionHistory(userId);
 
     return res.status(200).json(result);

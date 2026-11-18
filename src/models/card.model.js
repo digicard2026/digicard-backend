@@ -216,7 +216,7 @@ const cardSchema = new mongoose.Schema({
   aboutText: { type: String },
   
   // Email Fields
-  email: { type: String, required: true },
+  email: { type: String, required: true, lowercase: true, trim: true },
   emails: [emailSchema],
   
   // URL Customization Fields

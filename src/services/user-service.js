@@ -19,7 +19,7 @@ exports.isValidPassword = (password) =>
   /[!@#$%^&*(),.?":{}|<>]/.test(password);
 
 // Create user & initialize subscription with selected plan and addons
-exports.createUser = async ({ email, password, selectedPlan, selectedAddons = [], billingCycle = "monthly", createdBy = null }) => {
+exports.createUser = async ({ email, password, selectedPlan, selectedAddons = [], billingCycle = "monthly", createdBy = null, name = null, firstName = null, lastName = null }) => {
   try {
     const cleanEmail = email.trim().toLowerCase();
 
@@ -28,10 +28,38 @@ exports.createUser = async ({ email, password, selectedPlan, selectedAddons = []
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
+    // Derive readable first & last name from email if not provided
+    let derivedFirst = firstName || "";
+    let derivedLast = lastName || "";
+    let derivedName = name || "";
+
+    if (!derivedFirst && !derivedName) {
+      const rawUsername = cleanEmail.split('@')[0].replace(/[0-9]+/g, ' ').trim();
+      const parts = rawUsername.split(/[\._\-\s]+/).filter(Boolean);
+      if (parts.length >= 2) {
+        derivedFirst = parts[0].charAt(0).toUpperCase() + parts[0].slice(1).toLowerCase();
+        derivedLast = parts[parts.length - 1].charAt(0).toUpperCase() + parts[parts.length - 1].slice(1).toLowerCase();
+      } else if (parts.length === 1 && parts[0].length >= 2) {
+        const single = parts[0];
+        // If length >= 5 try continuous split
+        if (single.length >= 5) {
+          const mid = Math.floor(single.length / 2);
+          derivedFirst = single.slice(0, mid).charAt(0).toUpperCase() + single.slice(0, mid).slice(1).toLowerCase();
+          derivedLast = single.slice(mid).charAt(0).toUpperCase() + single.slice(mid).slice(1).toLowerCase();
+        } else {
+          derivedFirst = single.charAt(0).toUpperCase() + single.slice(1).toLowerCase();
+        }
+      }
+      derivedName = derivedFirst && derivedLast ? `${derivedFirst} ${derivedLast}` : (derivedFirst || "User");
+    }
+
     const user = await User.create({
       email: cleanEmail,
       password: hashedPassword,
-      role: selectedPlan ? "customer" : "",
+      name: derivedName,
+      firstName: derivedFirst,
+      lastName: derivedLast,
+      role: selectedPlan ? "customer" : "customer",
       isActive: true,
       registrationComplete: true, // TEMPORARY: allows user to login directly
       createdBy: createdBy || null,

@@ -469,7 +469,15 @@ exports.getCardByUrlSlug = async (urlSlug) => {
  
 // READ - Get card by email
 exports.getCardByEmail = async (email) => {
-    return await cardModel.find({ email }).lean();
+    if (!email) return [];
+    const cleanEmail = String(email).trim().toLowerCase();
+    const escaped = cleanEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return await cardModel.find({
+        $or: [
+            { email: cleanEmail },
+            { email: new RegExp(`^${escaped}$`, 'i') }
+        ]
+    }).lean();
 };
  
 // UPDATE - Update card with URL handling (by ID)

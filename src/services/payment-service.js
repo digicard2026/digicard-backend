@@ -4,6 +4,7 @@ const Plan = require("../models/plan.model");
 const Addon = require("../models/addon.model");
 const SubscriptionPlan = require("../models/subscriptionPlan.model");
 const UserSubscription = require("../models/user-subscription.model");
+const Card = require("../models/card.model");
 
 const mongoose = require("mongoose");
 
@@ -26,7 +27,7 @@ exports.createOrderService = async (amount, planDetails = {}) => {
     };
 
     const order = await razorpay.orders.create(options);
-    
+
     return {
       success: true,
       order: {
@@ -181,7 +182,7 @@ exports.createOrderWithSubscription = async (
         addonDocs = await Addon.find({ key: { $in: normalizedAddonKeys }, isActive: true });
         // Background auto-seed if Addon collection has 0 items
         if (addonDocs.length === 0 && defaultAddons && defaultAddons.length > 0) {
-          Addon.insertMany(defaultAddons).catch(() => {});
+          Addon.insertMany(defaultAddons).catch(() => { });
         }
       }
     } catch (e) {
@@ -307,7 +308,7 @@ exports.verifyPaymentService = (
       .digest("hex");
 
     const isValid = expectedSignature === razorpay_signature;
-    
+
     return {
       success: isValid,
       isValid: isValid,
@@ -344,7 +345,7 @@ exports.verifyAndActivateSubscription = async (
       .digest("hex");
 
     const isValid = expectedSignature === razorpay_signature;
-    
+
     if (!isValid) {
       return {
         success: false,
@@ -397,14 +398,13 @@ exports.verifyAndActivateSubscription = async (
     // Calculate dates
     const { startDate, endDate } = calculateDates(plan.durationDays || (duration === "yearly" ? 365 : 30));
 
-    // Update SubscriptionPlan
-    const subscriptionPlan = await SubscriptionPlan.findOneAndUpdate(
-      { 
-        userId: userId,
+    // Update SubscriptionPlan (or create if order was created via fallback route)
+    let subscriptionPlan = await SubscriptionPlan.findOneAndUpdate(
+      {
         razorpayOrderId: razorpay_order_id,
-        status: "pending"
       },
       {
+        userId: userId,
         status: "completed",
         paymentStatus: "success",
         transactionId: razorpay_payment_id
@@ -413,19 +413,26 @@ exports.verifyAndActivateSubscription = async (
     );
 
     if (!subscriptionPlan) {
-      return {
-        success: false,
-        message: "No pending subscription found"
-      };
+      subscriptionPlan = await SubscriptionPlan.create({
+        userId: userId,
+        planId: plan._id,
+        selectedPrice: amountPaid ? Number(amountPaid) : (plan.price || 500),
+        selectedDurationDays: plan.durationDays || (duration === "yearly" ? 365 : 30),
+        status: "completed",
+        razorpayOrderId: razorpay_order_id,
+        paymentStatus: "success",
+        transactionId: razorpay_payment_id,
+        purchasedAddons: Array.isArray(selectedAddons) ? selectedAddons : []
+      });
     }
 
     // Expire old active subscriptions
     await UserSubscription.updateMany(
-      { 
-        userId: userId, 
-        status: "active" 
+      {
+        userId: userId,
+        status: "active"
       },
-      { 
+      {
         status: "expired",
         endDate: new Date()
       }
@@ -454,6 +461,34 @@ exports.verifyAndActivateSubscription = async (
     });
 
     await userSubscription.save();
+
+    // Mark all existing cards of the user as non-trial upon payment activation
+    try {
+      const User = require("../models/user.model");
+      const userObj = await User.findById(userId);
+      const userEmail = userObj?.email?.toLowerCase()?.trim();
+
+      const queryFilters = [{ createdBy: userId }];
+      if (mongoose.Types.ObjectId.isValid(userId)) {
+        queryFilters.push({ createdBy: new mongoose.Types.ObjectId(userId) });
+      }
+      if (userEmail) {
+        queryFilters.push({ email: userEmail });
+        queryFilters.push({ email: new RegExp(`^${userEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') });
+      }
+
+      await Card.updateMany(
+        { $or: queryFilters },
+        {
+          $set: {
+            isTrialCard: false,
+            cardType: masterMeta.name || plan.name
+          }
+        }
+      );
+    } catch (cardErr) {
+      console.warn("Could not update card trial status upon payment:", cardErr);
+    }
 
     return {
       success: true,

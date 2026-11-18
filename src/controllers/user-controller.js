@@ -99,14 +99,42 @@ exports.signUp = async (req, res) => {
     // createUser service handles duplicate email, password hashing, createdBy attribution, and subscription initialization
     const user = await createUser({ email, password, selectedPlan, selectedAddons, billingCycle, createdBy });
 
+    // Generate JWT auth token for instant authenticated session
+    const token = jwt.sign(
+      {
+        id: user._id,
+        email: user.email,
+        role: user.role || "customer",
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: "1d" }
+    );
 
-    //  await sendVerificationEmail(user);===temporary disabled
+    // Keep cookies in sync identical to verifyUser (login)
+    res.cookie("token", token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+    });
 
+    res.cookie("user_id", user._id.toString(), {
+      httpOnly: false,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+    });
 
     // -------------------- RESPONSE --------------------
     return res.status(201).json({
       success: true,
-      message: "User registered successfully. Please check your email to verify your account.",
+      token,
+      user_id: user._id.toString(),
+      name: user.name || "",
+      firstName: user.firstName || "",
+      lastName: user.lastName || "",
+      email: user.email,
+      role: user.role || "customer",
+      registrationComplete: user.registrationComplete || true,
+      message: "User registered successfully.",
       data: {
         _id: user._id,
         email: user.email,
